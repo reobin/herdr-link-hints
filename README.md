@@ -2,7 +2,7 @@
 
 Vimium-style keyboard link hints for [Herdr](https://herdr.dev).
 Tap a key, get a hint code beside every link on screen, type the code to
-open it. No mouse, no daemon: everything runs once per keypress and exits.
+open it.
 
 ## Install
 
