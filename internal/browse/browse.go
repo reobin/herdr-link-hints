@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// Anything a terminal happens to render as a link but is not ours to
-// launch, such as javascript: or data:, stays out of this list.
+// javascript: and data: stay out: a terminal may render them, but they are
+// not ours to launch.
 var schemes = []string{"http://", "https://", "ftp://", "file://", "mailto:"}
 
 func Open(url string) error {

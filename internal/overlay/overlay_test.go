@@ -1,0 +1,341 @@
+package overlay
+
+import (
+	"bytes"
+	"image"
+	"image/png"
+	"strings"
+	"testing"
+
+	"github.com/reobin/herdr-link-hints/internal/theme"
+)
+
+var cell = Cell{Width: 8, Height: 16}
+
+func scene(badges []Badge, viewport Size) Scene {
+	return Scene{Badges: badges, Colors: theme.Fallback(), Cell: cell, Viewport: viewport}
+}
+
+func decode(t *testing.T, frame Frame) image.Image {
+	t.Helper()
+	img, err := png.Decode(bytes.NewReader(frame.PNG))
+	if err != nil {
+		t.Fatalf("decode frame: %v", err)
+	}
+	return img
+}
+
+func alphaAt(img image.Image, x, y int) uint32 {
+	_, _, _, a := img.At(x, y).RGBA()
+	return a >> 8
+}
+
+// centreOf is a pixel well inside a cell, away from borders and rules.
+func centreOf(row, col int) (int, int) {
+	return col*cell.Width + cell.Width/2, row*cell.Height + cell.Height/2
+}
+
+func render(t *testing.T, badges []Badge, viewport Size) (Frame, image.Image) {
+	t.Helper()
+	frame, err := Render(scene(badges, viewport))
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+	return frame, decode(t, frame)
+}
+
+func TestRenderCoversTheWholeViewport(t *testing.T) {
+	t.Parallel()
+	viewport := Size{Cols: 80, Rows: 24}
+	frame, _ := render(t, []Badge{{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as"}}, viewport)
+	if frame.Row != 0 || frame.Col != 0 {
+		t.Fatalf("frame origin = (%d, %d); want (0, 0)", frame.Row, frame.Col)
+	}
+	if frame.Rows != viewport.Rows || frame.Cols != viewport.Cols {
+		t.Fatalf("frame grid = %dx%d; want %dx%d", frame.Rows, frame.Cols, viewport.Rows, viewport.Cols)
+	}
+	if frame.Width != viewport.Cols*cell.Width || frame.Height != viewport.Rows*cell.Height {
+		t.Fatalf("frame pixels = %dx%d", frame.Width, frame.Height)
+	}
+}
+
+// Everything that is not a link has to be dimmed but still visible.
+func TestRenderDimsEverythingButTheLinks(t *testing.T) {
+	t.Parallel()
+	_, img := render(t, []Badge{{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as"}}, Size{Cols: 80, Rows: 24})
+
+	x, y := centreOf(20, 40)
+	if a := alphaAt(img, x, y); a == 0 || a == 0xFF {
+		t.Fatalf("plain text at (%d, %d) has alpha %#x; want a partial scrim", x, y, a)
+	}
+	x, y = centreOf(4, 12)
+	if a := alphaAt(img, x, y); a != 0 {
+		t.Fatalf("the link at (%d, %d) has alpha %#x; want it left clear", x, y, a)
+	}
+}
+
+func TestRenderUnderlinesTheLink(t *testing.T) {
+	t.Parallel()
+	_, img := render(t, []Badge{{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as"}}, Size{Cols: 80, Rows: 24})
+	bottom := (4+1)*cell.Height - 1
+	for _, col := range []int{10, 13, 15} {
+		x := col*cell.Width + cell.Width/2
+		if a := alphaAt(img, x, bottom); a != 0xFF {
+			t.Fatalf("no rule under the link at column %d: alpha %#x", col, a)
+		}
+	}
+	if a := alphaAt(img, 16*cell.Width+cell.Width/2, bottom); a == 0xFF {
+		t.Fatal("the rule runs past the end of the link")
+	}
+}
+
+func TestRenderDrawsTheBadgeBesideTheLink(t *testing.T) {
+	t.Parallel()
+	_, img := render(t, []Badge{{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as"}}, Size{Cols: 80, Rows: 24})
+	for _, col := range []int{8, 9} {
+		x, y := centreOf(4, col)
+		if a := alphaAt(img, x, y); a != 0xFF {
+			t.Fatalf("badge cell %d is not opaque: alpha %#x", col, a)
+		}
+	}
+}
+
+// A ruled-out hint fades rather than disappearing, so the screen stays put.
+func TestRenderFadesARuledOutBadge(t *testing.T) {
+	t.Parallel()
+	_, img := render(t, []Badge{
+		{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as"},
+		{Row: 8, Col: 10, Before: 4, Width: 6, Code: "df", Dim: true},
+	}, Size{Cols: 80, Rows: 24})
+
+	x, y := centreOf(4, 8)
+	bright := alphaAt(img, x, y)
+	x, y = centreOf(8, 8)
+	faded := alphaAt(img, x, y)
+	if bright != 0xFF {
+		t.Fatalf("the matching badge is not opaque: alpha %#x", bright)
+	}
+	if faded == 0 || faded >= bright {
+		t.Fatalf("the ruled-out badge has alpha %#x; want it faded but drawn", faded)
+	}
+	if x, y := centreOf(8, 12); alphaAt(img, x, y) != 0 {
+		t.Fatal("a ruled-out link should stay readable")
+	}
+}
+
+func TestRenderClipsToTheViewport(t *testing.T) {
+	t.Parallel()
+	viewport := Size{Cols: 80, Rows: 24}
+	_, img := render(t, []Badge{
+		{Row: 40, Col: 2, Width: 4, Code: "as"},  // below the viewport
+		{Row: 2, Col: 200, Width: 4, Code: "sd"}, // right of it
+		{Row: -1, Col: 2, Width: 4, Code: "df"},  // above it
+	}, viewport)
+	if x, y, ok := notScrim(img); ok {
+		t.Fatalf("a badge outside the viewport was drawn at (%d, %d)", x, y)
+	}
+}
+
+func TestRenderSlidesABadgeInAtTheRightEdge(t *testing.T) {
+	t.Parallel()
+	viewport := Size{Cols: 80, Rows: 24}
+	_, img := render(t, []Badge{{Row: 3, Col: 79, Before: 0, Width: 1, Code: "as"}}, viewport)
+	// Placed on the row above, slid left so the whole code fits: a code cut
+	// short is the wrong code to type.
+	for _, col := range []int{78, 79} {
+		x, y := centreOf(2, col)
+		if a := alphaAt(img, x, y); a != 0xFF {
+			t.Fatalf("the badge is not drawn at column %d: alpha %#x", col, a)
+		}
+	}
+}
+
+// Without a badge the scrim is still the whole frame: the pane is taken
+// over either way.
+func TestRenderScrimsAViewportWithoutBadges(t *testing.T) {
+	t.Parallel()
+	viewport := Size{Cols: 80, Rows: 24}
+	frame, img := render(t, nil, viewport)
+	if frame.Rows != viewport.Rows || frame.Cols != viewport.Cols {
+		t.Fatalf("frame grid = %dx%d; want %dx%d", frame.Rows, frame.Cols, viewport.Rows, viewport.Cols)
+	}
+	if x, y, ok := notScrim(img); ok {
+		t.Fatalf("something other than the scrim is drawn at (%d, %d)", x, y)
+	}
+}
+
+// notScrim finds the first pixel the scrim does not account for.
+func notScrim(img image.Image) (int, int, bool) {
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if alphaAt(img, x, y) != scrimAlpha {
+				return x, y, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+func TestRenderRejectsAnUnknownCellSize(t *testing.T) {
+	t.Parallel()
+	zeroCell := scene([]Badge{{Code: "a"}}, Size{Cols: 80, Rows: 24})
+	zeroCell.Cell = Cell{}
+	if _, err := Render(zeroCell); err == nil {
+		t.Fatal("Render() with a zero cell returned no error")
+	}
+	if _, err := Render(scene([]Badge{{Code: "a"}}, Size{})); err == nil {
+		t.Fatal("Render() with a zero viewport returned no error")
+	}
+}
+
+func TestCheckSizeRejectsAnOversizeFrame(t *testing.T) {
+	t.Parallel()
+	if err := checkSize(maxFrameBytes); err != nil {
+		t.Fatalf("checkSize(%d) = %v; want no error", maxFrameBytes, err)
+	}
+	err := checkSize(maxFrameBytes + 1)
+	if err == nil || !strings.Contains(err.Error(), "over the") {
+		t.Fatalf("checkSize(%d) = %v; want an over-size error", maxFrameBytes+1, err)
+	}
+}
+
+// The worst case a real pane can produce still has to fit under the cap.
+func TestRenderKeepsAFullScreenUnderTheCap(t *testing.T) {
+	t.Parallel()
+	viewport := Size{Cols: 204, Rows: 57}
+	var badges []Badge
+	for row := range viewport.Rows {
+		for col := 0; col < viewport.Cols; col += 6 {
+			badges = append(badges, Badge{Row: row, Col: col, Width: 4, Code: "as"})
+		}
+	}
+	full := scene(badges, viewport)
+	full.Cell = Cell{Width: 19, Height: 54}
+	frame, err := Render(full)
+	if err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+	if len(frame.PNG) > maxFrameBytes/2 {
+		t.Fatalf("a full screen encodes to %d bytes, too near the %d cap", len(frame.PNG), maxFrameBytes)
+	}
+}
+
+// Links are usually separated by a single space, so a two-character code
+// cannot use the gutter.
+func TestPlaceKeepsTheHintOffTheLink(t *testing.T) {
+	t.Parallel()
+	wide := Size{Cols: 80, Rows: 24}
+	cases := []struct {
+		name     string
+		badge    Badge
+		viewport Size
+		wantRow  int
+		wantCol  int
+	}{
+		{"room beside the link", Badge{Row: 5, Col: 10, Before: 4, Code: "as"}, wide, 5, 8},
+		{"exactly enough room", Badge{Row: 5, Col: 10, Before: 2, Code: "as"}, wide, 5, 8},
+		{"one space fits one character", Badge{Row: 5, Col: 10, Before: 1, Code: "a"}, wide, 5, 9},
+		{"one space does not fit two", Badge{Row: 5, Col: 10, Before: 1, Code: "as"}, wide, 4, 10},
+		{"flush against a word", Badge{Row: 5, Col: 10, Before: 0, Code: "a"}, wide, 4, 10},
+		{"the top row falls to the row below", Badge{Row: 0, Col: 10, Before: 0, Code: "as"}, wide, 1, 10},
+		{"the right edge slides the badge in", Badge{Row: 5, Col: 79, Before: 0, Code: "as"}, wide, 4, 78},
+		{"a one-row pane has nowhere to go", Badge{Row: 0, Col: 10, Before: 0, Code: "as"}, Size{Cols: 80, Rows: 1}, 0, 10},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row, col := place(tc.badge, len([]rune(tc.badge.Code)), tc.viewport, nil)
+			if row != tc.wantRow || col != tc.wantCol {
+				t.Fatalf("place(%+v) = %d, %d; want %d, %d", tc.badge, row, col, tc.wantRow, tc.wantCol)
+			}
+		})
+	}
+}
+
+func TestGlyphIsCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	lower, ok := glyph('a')
+	if !ok {
+		t.Fatal("glyph('a') is missing")
+	}
+	upper, ok := glyph('A')
+	if !ok {
+		t.Fatal("glyph('A') is missing")
+	}
+	if lower != upper {
+		t.Fatal("glyph('a') and glyph('A') differ")
+	}
+}
+
+// Every letter has to be told apart at five pixels wide.
+func TestEveryGlyphIsDistinct(t *testing.T) {
+	t.Parallel()
+	seen := make(map[[glyphHeight]byte]rune, len(glyphs))
+	for r, bitmap := range glyphs {
+		if other, clash := seen[bitmap]; clash {
+			t.Fatalf("%q and %q are the same bitmap", r, other)
+		}
+		seen[bitmap] = r
+	}
+}
+
+// A descender is what separates g from a and p from n.
+func TestDescendersReachBelowTheBaseline(t *testing.T) {
+	t.Parallel()
+	for _, r := range "gjpqy" {
+		bitmap, ok := glyph(r)
+		if !ok {
+			t.Fatalf("no glyph for %q", r)
+		}
+		if bitmap[glyphHeight-1] == 0 {
+			t.Fatalf("%q has no descender", r)
+		}
+	}
+	for _, r := range "aeimnorsuvwxz" {
+		bitmap, _ := glyph(r)
+		if bitmap[glyphHeight-1] != 0 {
+			t.Fatalf("%q sits below the baseline", r)
+		}
+	}
+}
+
+func TestEveryDefaultAlphabetLetterHasAGlyph(t *testing.T) {
+	t.Parallel()
+	for _, r := range "asdfghjklqwertyuiopzxcvbnm0123456789" {
+		if _, ok := glyph(r); !ok {
+			t.Fatalf("no glyph for %q", r)
+		}
+	}
+}
+
+// The clear area belongs to the link, not to wherever the badge ended up.
+func TestRenderClearsTheLinkNotTheBadgeCell(t *testing.T) {
+	t.Parallel()
+	// Before is 1 and the code is two characters, so the badge lands on the
+	// row above.
+	_, img := render(t, []Badge{{Row: 6, Col: 20, Before: 1, Width: 4, Code: "as"}}, Size{Cols: 80, Rows: 24})
+	for _, col := range []int{20, 21, 22, 23} {
+		x, y := centreOf(6, col)
+		if a := alphaAt(img, x, y); a != 0 {
+			t.Fatalf("link cell %d has alpha %#x; want it left clear", col, a)
+		}
+	}
+	x, y := centreOf(6, 24)
+	if a := alphaAt(img, x, y); a == 0 {
+		t.Fatalf("the cell past the link was cleared too")
+	}
+}
+
+func TestPlaceAvoidsANeighboursLink(t *testing.T) {
+	t.Parallel()
+	wide := Size{Cols: 80, Rows: 24}
+	above := Badge{Row: 4, Col: 10, Width: 4, Code: "sd"}
+	badge := Badge{Row: 5, Col: 10, Width: 4, Code: "as"}
+	taken := linkCells([]Badge{above, badge}, wide)
+	// The row above holds another link, and covering it would hide the only
+	// way to select it.
+	if row, col := place(badge, 2, wide, taken); row != 6 || col != 10 {
+		t.Fatalf("place() = %d, %d; want 6, 10", row, col)
+	}
+}

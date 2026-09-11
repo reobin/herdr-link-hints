@@ -119,25 +119,59 @@ func TestMerge(t *testing.T) {
 	t.Parallel()
 	t.Run("same cell collapses", func(t *testing.T) {
 		t.Parallel()
+		lines := []string{"see https://a.io/x here"}
 		visible := []Visible{{Match: "https://a.io/x", Row: 0, Col: 4}}
 		hidden := []ansi.Link{{URL: "https://a.io/x", Row: 0, Col: 4, Label: "https://a.io/x"}}
-		if got := Merge(visible, hidden); len(got) != 1 || got[0].Kind != OSC8 {
+		if got := Merge(lines, visible, hidden); len(got) != 1 || got[0].Kind != OSC8 {
 			t.Fatalf("Merge() = %+v", got)
 		}
 	})
 
-	t.Run("same url collapses even at a different cell", func(t *testing.T) {
+	// The same destination in two places gets two hints now: a hint has to
+	// be on the copy you are looking at.
+	t.Run("a repeated anchor is marked everywhere", func(t *testing.T) {
 		t.Parallel()
-		visible := []Visible{{Match: "https://a.io/x", Row: 9, Col: 0}}
-		hidden := []ansi.Link{{URL: "https://a.io/x", Row: 0, Col: 4, Label: "x"}}
-		if got := Merge(visible, hidden); len(got) != 1 {
-			t.Fatalf("Merge() = %+v, want the hidden link only", got)
+		lines := []string{
+			"yes, #971 is still a draft",
+			"",
+			"auto mode on \u00b7 PR #971 \u00b7 1 agent",
+		}
+		hidden := []ansi.Link{{URL: "https://g.io/pull/971", Row: 0, Col: 5, Label: "#971"}}
+		got := Merge(lines, nil, hidden)
+		if len(got) != 2 {
+			t.Fatalf("Merge() = %+v, want both occurrences", got)
+		}
+		if got[0].Row != 0 || got[0].Col != 5 {
+			t.Fatalf("Merge()[0] = %+v, want row 0 col 5", got[0])
+		}
+		if got[1].Row != 2 || got[1].Col != 18 {
+			t.Fatalf("Merge()[1] = %+v, want row 2 col 18", got[1])
+		}
+	})
+
+	// A replay smaller than the pane puts a link off the bottom of the
+	// screen, so the anchor search is what actually places it.
+	t.Run("the anchor beats the replay position", func(t *testing.T) {
+		t.Parallel()
+		lines := []string{"", "", "", "the #232 pull request"}
+		hidden := []ansi.Link{{URL: "https://g.io/pull/232", Row: 0, Col: 0, Label: "#232"}}
+		got := Merge(lines, nil, hidden)
+		if len(got) != 1 || got[0].Row != 3 || got[0].Col != 4 {
+			t.Fatalf("Merge() = %+v, want row 3 col 4", got)
+		}
+	})
+
+	t.Run("an anchor nowhere on screen keeps the replay position", func(t *testing.T) {
+		t.Parallel()
+		got := Merge([]string{"nothing here"}, nil, []ansi.Link{{URL: "https://g.io/pull/232", Row: 7, Col: 4, Label: "#232"}})
+		if len(got) != 1 || got[0].Row != 7 || got[0].Col != 4 {
+			t.Fatalf("Merge() = %+v, want row 7 col 4", got)
 		}
 	})
 
 	t.Run("hidden link keeps its anchor text", func(t *testing.T) {
 		t.Parallel()
-		got := Merge(nil, []ansi.Link{{URL: "https://github.com/o/r/pull/232", Row: 0, Col: 4, Label: "#232"}})
+		got := Merge(nil, nil, []ansi.Link{{URL: "https://github.com/o/r/pull/232", Row: 0, Col: 4, Label: "#232"}})
 		if len(got) != 1 || got[0].Text != "#232" || got[0].URL != "https://github.com/o/r/pull/232" {
 			t.Fatalf("Merge() = %+v", got)
 		}
@@ -145,25 +179,87 @@ func TestMerge(t *testing.T) {
 
 	t.Run("bare host gets a scheme", func(t *testing.T) {
 		t.Parallel()
-		got := Merge([]Visible{{Match: "www.x.io/a", Row: 1, Col: 0}}, nil)
+		got := Merge([]string{"www.x.io/a"}, []Visible{{Match: "www.x.io/a", Row: 1, Col: 0}}, nil)
 		if len(got) != 1 || got[0].URL != "https://www.x.io/a" || got[0].Text != "www.x.io/a" {
 			t.Fatalf("Merge() = %+v", got)
 		}
 	})
+
+	t.Run("a flood of matches is capped", func(t *testing.T) {
+		t.Parallel()
+		lines := make([]string, 40)
+		for i := range lines {
+			lines[i] = "see #2 here"
+		}
+		got := Merge(lines, nil, []ansi.Link{{URL: "https://g.io/pull/2", Label: "#2"}})
+		if len(got) != maxAnchorHits {
+			t.Fatalf("Merge() marked %d cells, want %d", len(got), maxAnchorHits)
+		}
+	})
 }
 
-func TestDedupe(t *testing.T) {
+func TestMergeCountsBlanksBeforeALink(t *testing.T) {
 	t.Parallel()
-	in := []Link{
-		{URL: "https://a.io/x", Pane: "p1"},
-		{URL: "https://a.io/x", Pane: "p2"},
-		{URL: "https://b.io/y", Pane: "p2"},
+	cases := []struct {
+		name string
+		line string
+		col  int
+		want int
+	}{
+		{"room in the gutter", "see    https://a.io/x", 7, 4},
+		{"flush against a word", "(https://a.io/x)", 1, 0},
+		{"start of the line", "https://a.io/x", 0, 0},
+		{"wide characters do not count as blanks", "\u65e5\u672c https://a.io/x", 5, 1},
+		{"past the end of the text", "ab", 6, 4},
 	}
-	got := Dedupe(in)
-	if len(got) != 2 || got[0].Pane != "p1" || got[1].URL != "https://b.io/y" {
-		t.Fatalf("Dedupe() = %+v", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := Merge([]string{tc.line}, []Visible{{Match: "https://a.io/x", Row: 0, Col: tc.col}}, nil)
+			if len(got) != 1 {
+				t.Fatalf("Merge() = %+v", got)
+			}
+			if got[0].Before != tc.want {
+				t.Fatalf("Before = %d, want %d", got[0].Before, tc.want)
+			}
+		})
 	}
-	if Dedupe(nil) != nil {
-		t.Fatal("Dedupe(nil) should stay nil")
+}
+
+// A column is a screen cell, not a byte offset: a byte offset lands far to
+// the right on any line with wide text.
+func TestFromLinesReportsDisplayColumns(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		line string
+		want int
+	}{
+		{"ascii", "see https://a.io/x", 4},
+		{"accented latin", "café https://a.io/x", 5},
+		{"cjk", "日本語 https://a.io/x", 7},
+		{"emoji", "🚀 https://a.io/x", 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := FromLines([]string{tc.line}, nil)
+			if len(got) != 1 {
+				t.Fatalf("FromLines(%q) = %+v, want one link", tc.line, got)
+			}
+			if got[0].Col != tc.want {
+				t.Fatalf("FromLines(%q) col = %d, want %d", tc.line, got[0].Col, tc.want)
+			}
+		})
+	}
+}
+
+func TestMergeSkipsAnchorInsideLongerText(t *testing.T) {
+	t.Parallel()
+	lines := []string{"#1 opened, #12 merged, #123 closed"}
+	hidden := []ansi.Link{{URL: "https://g.io/pull/1", Row: 0, Col: 0, Label: "#1"}}
+	got := Merge(lines, nil, hidden)
+	if len(got) != 1 || got[0].Row != 0 || got[0].Col != 0 {
+		t.Fatalf("Merge() = %+v, want only the standalone #1", got)
 	}
 }

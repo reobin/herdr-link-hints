@@ -7,12 +7,13 @@ import (
 
 func TestParseScreenPanes(t *testing.T) {
 	t.Parallel()
-	layout := `{"result":{"layout":{"panes":[{"pane_id":"w1:p1"},{"pane_id":""},{"pane_id":"w1:p2"}]}}}`
+	layout := `{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"x":0,"y":0,"width":206,"height":59}},{"pane_id":""},{"pane_id":"w1:p2","rect":{"x":0,"y":59,"width":206,"height":20}}]}}}`
 	got, err := parseScreenPanes([]byte(layout), "w1:p1")
 	if err != nil {
 		t.Fatalf("parseScreenPanes: %v", err)
 	}
-	if want := []string{"w1:p1", "w1:p2"}; !reflect.DeepEqual(got, want) {
+	want := []Pane{{ID: "w1:p1", Width: 206, Height: 59}, {ID: "w1:p2", Width: 206, Height: 20}}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseScreenPanes() = %+v, want %+v", got, want)
 	}
 }
@@ -21,7 +22,7 @@ func TestParseScreenPanesFallsBack(t *testing.T) {
 	t.Parallel()
 	for _, out := range []string{`{"result":{"layout":{"panes":[]}}}`, "not json"} {
 		got, _ := parseScreenPanes([]byte(out), "w1:p9")
-		if want := []string{"w1:p9"}; !reflect.DeepEqual(got, want) {
+		if want := []Pane{{ID: "w1:p9"}}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("parseScreenPanes(%q) = %+v, want %+v", out, got, want)
 		}
 	}
@@ -54,16 +55,19 @@ func TestParsePaneLabelsKeepsDefaultsOnBadJSON(t *testing.T) {
 	}
 }
 
-func TestParseScrollOffset(t *testing.T) {
+func TestParsePaneScroll(t *testing.T) {
 	t.Parallel()
-	got, err := parseScrollOffset([]byte(`{"result":{"pane":{"scroll":{"max_offset_from_bottom":17}}}}`))
-	if err != nil || got != 17 {
-		t.Fatalf("parseScrollOffset() = %d, %v", got, err)
+	got, err := parsePaneScroll([]byte(`{"result":{"pane":{"scroll":{"max_offset_from_bottom":17,"viewport_rows":57}}}}`))
+	if err != nil {
+		t.Fatalf("parsePaneScroll: %v", err)
 	}
-	if got, _ := parseScrollOffset([]byte(`{"result":{"pane":{}}}`)); got != 0 {
-		t.Fatalf("parseScrollOffset() = %d, want 0 when scroll is absent", got)
+	if want := (Scroll{Offset: 17, ViewportRows: 57}); got != want {
+		t.Fatalf("parsePaneScroll() = %+v, want %+v", got, want)
 	}
-	if _, err := parseScrollOffset([]byte("nope")); err == nil {
+	if got, _ := parsePaneScroll([]byte(`{"result":{"pane":{}}}`)); got != (Scroll{}) {
+		t.Fatalf("parsePaneScroll() = %+v, want a zero Scroll when scroll is absent", got)
+	}
+	if _, err := parsePaneScroll([]byte("nope")); err == nil {
 		t.Fatal("expected a parse error")
 	}
 }

@@ -13,8 +13,8 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/links"
 )
 
-// fakeSource answers pane reads from a table, keyed by pane and source.
-// A Scanner reads panes concurrently, so the counters are guarded.
+// fakeSource answers pane reads from a table. A Scanner reads panes
+// concurrently, so the counters are guarded.
 type fakeSource struct {
 	text    map[[2]string][]string
 	hidden  map[string][]ansi.Link
@@ -71,7 +71,8 @@ func paneText(pane string, lines ...string) map[[2]string][]string {
 	}
 }
 
-func TestLinksDedupesAcrossPanes(t *testing.T) {
+// One destination on two panes gets a hint on each.
+func TestLinksHintsEveryCopyAcrossPanes(t *testing.T) {
 	t.Parallel()
 	source := &fakeSource{text: map[[2]string][]string{}}
 	for key, value := range paneText("w1:p1", "go https://a.io/x") {
@@ -86,7 +87,11 @@ func TestLinksDedupesAcrossPanes(t *testing.T) {
 	for _, l := range got {
 		pairs = append(pairs, [2]string{l.URL, l.Pane})
 	}
-	want := [][2]string{{"https://a.io/x", "w1:p1"}, {"https://b.io/y", "w1:p2"}}
+	want := [][2]string{
+		{"https://a.io/x", "w1:p1"},
+		{"https://a.io/x", "w1:p2"},
+		{"https://b.io/y", "w1:p2"},
+	}
 	if !reflect.DeepEqual(pairs, want) {
 		t.Fatalf("Links() = %+v, want %+v", pairs, want)
 	}
@@ -159,6 +164,19 @@ func TestLocate(t *testing.T) {
 			wantRow: 0, wantCol: 4, wantOK: true,
 		},
 		{
+			name:    "re-finds a text link past wide characters",
+			visible: []string{"日本語 https://a.io/x"},
+			choice:  links.Link{URL: "https://a.io/x", Text: "https://a.io/x", Kind: links.Text, Row: 4, Col: 0},
+			shift:   9,
+			wantRow: 0, wantCol: 7, wantOK: true,
+		},
+		{
+			name:    "finds a hidden link past wide characters",
+			visible: []string{"🚀 #2 merged"},
+			choice:  links.Link{URL: "https://g.io/pull/2", Text: "#2", Kind: links.OSC8, Row: 9, Col: 9},
+			wantRow: 0, wantCol: 3, wantOK: true,
+		},
+		{
 			name:    "gives up when the link is gone",
 			visible: []string{"nothing here"},
 			choice:  links.Link{URL: "https://a.io/x", Text: "https://a.io/x", Kind: links.Text, Row: 0, Col: 4},
@@ -175,20 +193,6 @@ func TestLocate(t *testing.T) {
 				t.Fatalf("Locate() = %d, %d, %v; want %d, %d, %v", row, col, ok, tc.wantRow, tc.wantCol, tc.wantOK)
 			}
 		})
-	}
-}
-
-func TestLinksSkipsScrollbackWithoutWrappedURLs(t *testing.T) {
-	t.Parallel()
-	source := &fakeSource{text: paneText("w1:p1", "go https://a.io/x here")}
-	scanner := newScanner(source)
-	scanner.SkipObserve = true
-	got := scanner.Links(context.Background(), []string{"w1:p1"})
-	if len(got) != 1 || got[0].URL != "https://a.io/x" {
-		t.Fatalf("Links() = %+v", got)
-	}
-	if n := source.readCount("w1:p1", herdr.SourceUnwrapped); n != 0 {
-		t.Fatalf("unwrapped reads = %d, want none without a wrapped URL", n)
 	}
 }
 
@@ -220,6 +224,20 @@ func TestLinksCompletesURLWrappedAfterADot(t *testing.T) {
 	got := scanner.Links(context.Background(), []string{"w1:p1"})
 	if len(got) != 1 || got[0].URL != "https://docs.a.io/guide/v2.1/install" {
 		t.Fatalf("Links() = %+v", got)
+	}
+}
+
+func TestLinksSkipsScrollbackWithoutWrappedURLs(t *testing.T) {
+	t.Parallel()
+	source := &fakeSource{text: paneText("w1:p1", "go https://a.io/x here")}
+	scanner := newScanner(source)
+	scanner.SkipObserve = true
+	got := scanner.Links(context.Background(), []string{"w1:p1"})
+	if len(got) != 1 || got[0].URL != "https://a.io/x" {
+		t.Fatalf("Links() = %+v", got)
+	}
+	if n := source.readCount("w1:p1", herdr.SourceUnwrapped); n != 0 {
+		t.Fatalf("unwrapped reads = %d, want none without a wrapped URL", n)
 	}
 }
 
