@@ -21,10 +21,7 @@ const (
 	quietAfterFrame = 50 * time.Millisecond
 	// Hard stop, so a chatty pane cannot hold the picker open.
 	observeLimit = 800 * time.Millisecond
-	// Below this size a frame is a heartbeat, not a repaint: it must not
-	// reset the quiet timer.
-	minContentFrame = 512
-	maxFrameSize    = 4 << 20
+	maxFrameSize = 4 << 20
 )
 
 // ObserveOSC8 is the only way to see a link whose URL never appears as
@@ -64,10 +61,10 @@ func (c *Client) ObserveOSC8(ctx context.Context, pane string) ([]ansi.Link, err
 			if !open {
 				return ansi.ParseLinks(stream), nil
 			}
+			// A frame is a PTY read chunk of any size, so every one has to
+			// hold the window open or a repaint is cut mid-sequence.
 			stream = append(stream, frame...)
-			if len(frame) >= minContentFrame {
-				resetTimer(timer, quietAfterFrame)
-			}
+			resetTimer(timer, quietAfterFrame)
 		case <-timer.C:
 			return ansi.ParseLinks(stream), nil
 		}

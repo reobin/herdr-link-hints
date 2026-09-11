@@ -209,6 +209,20 @@ func TestLinksCompletesWrappedURLFromScrollback(t *testing.T) {
 	}
 }
 
+func TestLinksCompletesURLWrappedAfterADot(t *testing.T) {
+	t.Parallel()
+	source := &fakeSource{text: map[[2]string][]string{
+		{"w1:p1", herdr.SourceVisible}:   {"see https://docs.a.io/guide/v2.", "1/install here"},
+		{"w1:p1", herdr.SourceUnwrapped}: {"see https://docs.a.io/guide/v2.1/install here"},
+	}}
+	scanner := newScanner(source)
+	scanner.SkipObserve = true
+	got := scanner.Links(context.Background(), []string{"w1:p1"})
+	if len(got) != 1 || got[0].URL != "https://docs.a.io/guide/v2.1/install" {
+		t.Fatalf("Links() = %+v", got)
+	}
+}
+
 func TestNeedsUnwrapped(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -219,7 +233,7 @@ func TestNeedsUnwrapped(t *testing.T) {
 		{name: "no urls", visible: []string{"nothing here", "either"}, want: false},
 		{name: "complete url mid-line", visible: []string{"go https://a.io/x here", "next"}, want: false},
 		{name: "complete url at end of last line", visible: []string{"go https://a.io/x"}, want: false},
-		{name: "url plus prose punctuation at edge", visible: []string{"see https://a.io/x.", "next"}, want: false},
+		{name: "trailing dot at edge is ambiguous", visible: []string{"see https://a.io/x.", "next"}, want: true},
 		{name: "url wrapped across lines", visible: []string{"go https://a.io/long-ur", "l-continued"}, want: true},
 	}
 	for _, tc := range tests {

@@ -88,16 +88,17 @@ func (s *Scanner) paneLinks(ctx context.Context, pane string) []links.Link {
 	return found
 }
 
-// needsUnwrapped is true only when a visible line ends mid-URL, the one
-// case where scrollback changes the result. Trailing prose punctuation
-// (".../x.") does not count.
+// needsUnwrapped mirrors the carry in links.FromLines, which is when the
+// scrollback index is consulted. It matches on the raw end, not the
+// cleaned one: whether a trailing "." ends a URL or ends a sentence is
+// the very thing only scrollback can settle.
 func needsUnwrapped(visible []string) bool {
 	for i, line := range visible {
 		if i+1 >= len(visible) {
 			break
 		}
 		for _, m := range links.FindAll(line) {
-			if m.Start+len(links.Clean(m.Raw)) == len(line) {
+			if m.End == len(line) {
 				return true
 			}
 		}
