@@ -1,8 +1,9 @@
 // Package hints assigns short typeable codes to a list of targets.
 package hints
 
-// DefaultAlphabet keeps every hint on the home row.
-const DefaultAlphabet = "asdfghjkl"
+// DefaultAlphabet starts on the home row and widens: a code stays one
+// keypress only while the alphabet outnumbers the links.
+const DefaultAlphabet = "asdfghjklqwertyuiopzxcvbnm"
 
 // Codes returns n distinct codes of equal width, so a fully typed code is
 // never the prefix of another. It returns nil for an alphabet too small.
