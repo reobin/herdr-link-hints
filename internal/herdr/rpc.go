@@ -2,10 +2,13 @@ package herdr
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync/atomic"
 )
 
@@ -96,4 +99,115 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 		}
 		return nil
 	}
+}
+
+// Graphics reports what pane.graphics can do for a pane. A feature_disabled
+// error instead means the outer terminal has no Kitty graphics support,
+// which is the signal to fall back to the list picker.
+type Graphics struct {
+	CellWidthPx  int  `json:"cell_width_px"`
+	CellHeightPx int  `json:"cell_height_px"`
+	PaneVisible  bool `json:"pane_visible"`
+	MaxLayers    int  `json:"max_layers_per_pane"`
+}
+
+func (c *Client) GraphicsInfo(ctx context.Context, pane string) (Graphics, error) {
+	var result Graphics
+	err := c.call(ctx, "pane.graphics.info", map[string]any{"pane_id": pane}, &result)
+	return result, err
+}
+
+// Frame is one image placed over a pane's viewport cells.
+type Frame struct {
+	Pane   string
+	Layer  string
+	ZIndex int
+	PNG    []byte
+	Width  int // pixels
+	Height int // pixels
+	Row    int // cells
+	Col    int
+	Rows   int
+	Cols   int
+}
+
+func (c *Client) SetGraphics(ctx context.Context, f Frame) error {
+	params := map[string]any{
+		"pane_id":      f.Pane,
+		"layer_id":     f.Layer,
+		"z_index":      f.ZIndex,
+		"format":       "png",
+		"image_width":  f.Width,
+		"image_height": f.Height,
+		"data_base64":  base64.StdEncoding.EncodeToString(f.PNG),
+		"placement": map[string]any{
+			"viewport_row": f.Row,
+			"viewport_col": f.Col,
+			"grid_rows":    f.Rows,
+			"grid_cols":    f.Cols,
+		},
+	}
+	return c.call(ctx, "pane.graphics.set", params, nil)
+}
+
+// ClearGraphics names the layer: omitting it would clear only the layer
+// Herdr calls "primary", not ours.
+func (c *Client) ClearGraphics(ctx context.Context, pane, layer string) error {
+	return c.call(ctx, "pane.graphics.clear", map[string]any{"pane_id": pane, "layer_id": layer}, nil)
+}
+
+// PaneOpen describes the plugin pane to open. Width and Height take either
+// a cell count or a percentage such as "80%".
+type PaneOpen struct {
+	Plugin     string
+	Entrypoint string
+	Placement  string
+	Width      string
+	Height     string
+	Focus      bool
+	Env        map[string]string
+}
+
+func (c *Client) OpenPane(ctx context.Context, p PaneOpen) (string, error) {
+	params := map[string]any{
+		"plugin_id":  p.Plugin,
+		"entrypoint": p.Entrypoint,
+		"focus":      p.Focus,
+	}
+	if p.Placement != "" {
+		params["placement"] = p.Placement
+	}
+	if len(p.Env) > 0 {
+		params["env"] = p.Env
+	}
+	for key, size := range map[string]string{"width": p.Width, "height": p.Height} {
+		if value, ok := popupSize(size); ok {
+			params[key] = value
+		}
+	}
+	var result struct {
+		PluginPane struct {
+			Pane struct {
+				PaneID string `json:"pane_id"`
+			} `json:"pane"`
+		} `json:"plugin_pane"`
+	}
+	err := c.call(ctx, "plugin.pane.open", params, &result)
+	return result.PluginPane.Pane.PaneID, err
+}
+
+// popupSize keeps a percentage a string and a cell count a number, which is
+// the only shape Herdr accepts for each.
+func popupSize(size string) (any, bool) {
+	if size == "" {
+		return nil, false
+	}
+	if strings.HasSuffix(size, "%") {
+		return size, true
+	}
+	cells, err := strconv.Atoi(size)
+	if err != nil {
+		return nil, false
+	}
+	return cells, true
 }

@@ -53,6 +53,9 @@ func (t *Terminal) readEscape() key {
 	if !open {
 		return key{kind: keyEscape}
 	}
+	if b == ']' {
+		return t.skipOSC()
+	}
 	if b != '[' && b != 'O' {
 		return key{kind: keyEscape}
 	}
@@ -61,6 +64,26 @@ func (t *Terminal) readEscape() key {
 		b, open := t.nextByte(escapeSequenceWait)
 		if !open || (b >= '@' && b <= '~') {
 			return key{kind: keyUnknown}
+		}
+	}
+}
+
+// skipOSC swallows an OSC reply that missed the theme deadline, which
+// would otherwise read as a bare Esc and close the picker.
+func (t *Terminal) skipOSC() key {
+	for {
+		b, open := t.nextByte(escapeSequenceWait)
+		if !open {
+			return key{kind: keyUnknown}
+		}
+		if b == '\a' {
+			return key{kind: keyUnknown}
+		}
+		if b == 0x1b {
+			next, open := t.nextByte(escapeSequenceWait)
+			if !open || next == '\\' {
+				return key{kind: keyUnknown}
+			}
 		}
 	}
 }

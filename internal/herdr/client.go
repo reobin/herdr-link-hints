@@ -71,39 +71,51 @@ func (c *Client) PaneLines(ctx context.Context, pane, source string, lines int) 
 	return strings.Split(string(out), "\n"), nil
 }
 
+// Pane is a pane on screen. Width and Height are its outer rect in cells,
+// border included.
+type Pane struct {
+	ID     string
+	Width  int
+	Height int
+}
+
 // ScreenPanes lists the panes sharing a screen with the given one, and
 // falls back to that pane alone when the layout cannot be read.
-func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]string, error) {
+func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]Pane, error) {
 	out, err := c.run(ctx, "pane", "layout", "--pane", pane)
 	if err != nil {
-		return []string{pane}, err
+		return []Pane{{ID: pane}}, err
 	}
 	return parseScreenPanes(out, pane)
 }
 
-func parseScreenPanes(out []byte, fallback string) ([]string, error) {
+func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
 	var payload struct {
 		Result struct {
 			Layout struct {
 				Panes []struct {
 					PaneID string `json:"pane_id"`
+					Rect   struct {
+						Width  int `json:"width"`
+						Height int `json:"height"`
+					} `json:"rect"`
 				} `json:"panes"`
 			} `json:"layout"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
-		return []string{fallback}, fmt.Errorf("parse pane layout: %w", err)
+		return []Pane{{ID: fallback}}, fmt.Errorf("parse pane layout: %w", err)
 	}
-	var ids []string
+	var panes []Pane
 	for _, p := range payload.Result.Layout.Panes {
 		if p.PaneID != "" {
-			ids = append(ids, p.PaneID)
+			panes = append(panes, Pane{ID: p.PaneID, Width: p.Rect.Width, Height: p.Rect.Height})
 		}
 	}
-	if len(ids) == 0 {
-		return []string{fallback}, nil
+	if len(panes) == 0 {
+		return []Pane{{ID: fallback}}, nil
 	}
-	return ids, nil
+	return panes, nil
 }
 
 // PaneLabels gives every requested pane an entry, falling back to the tail
@@ -152,31 +164,37 @@ func shortID(pane string) string {
 	return pane
 }
 
-// ScrollOffset reports how far scrollback reaches below the viewport.
-// Comparing it before and after the user picks says how many lines of new
-// output pushed the hints upward.
-func (c *Client) ScrollOffset(ctx context.Context, pane string) (int, error) {
-	out, err := c.run(ctx, "pane", "get", pane)
-	if err != nil {
-		return 0, err
-	}
-	return parseScrollOffset(out)
+// Scroll is a pane's scroll state. Offset is how far scrollback reaches
+// below the viewport.
+type Scroll struct {
+	Offset       int
+	ViewportRows int
 }
 
-func parseScrollOffset(out []byte) (int, error) {
+func (c *Client) PaneScroll(ctx context.Context, pane string) (Scroll, error) {
+	out, err := c.run(ctx, "pane", "get", pane)
+	if err != nil {
+		return Scroll{}, err
+	}
+	return parsePaneScroll(out)
+}
+
+func parsePaneScroll(out []byte) (Scroll, error) {
 	var payload struct {
 		Result struct {
 			Pane struct {
 				Scroll struct {
 					MaxOffsetFromBottom int `json:"max_offset_from_bottom"`
+					ViewportRows        int `json:"viewport_rows"`
 				} `json:"scroll"`
 			} `json:"pane"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
-		return 0, fmt.Errorf("parse pane get: %w", err)
+		return Scroll{}, fmt.Errorf("parse pane get: %w", err)
 	}
-	return payload.Result.Pane.Scroll.MaxOffsetFromBottom, nil
+	scroll := payload.Result.Pane.Scroll
+	return Scroll{Offset: scroll.MaxOffsetFromBottom, ViewportRows: scroll.ViewportRows}, nil
 }
 
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {

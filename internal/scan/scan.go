@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/reobin/herdr-link-hints/internal/ansi"
+	"github.com/reobin/herdr-link-hints/internal/cells"
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
 )
@@ -20,8 +21,7 @@ type Source interface {
 	ObserveOSC8(ctx context.Context, pane string) ([]ansi.Link, error)
 }
 
-// Scanner logs a failed read rather than failing the scan: hints for three
-// panes out of four still beat no hints at all.
+// Scanner logs a failed read rather than failing the scan.
 type Scanner struct {
 	Source      Source
 	Log         *slog.Logger
@@ -45,7 +45,7 @@ func (s *Scanner) Links(ctx context.Context, panes []string) []links.Link {
 	for _, part := range perPane {
 		all = append(all, part...)
 	}
-	return links.Dedupe(all)
+	return all
 }
 
 func (s *Scanner) paneLinks(ctx context.Context, pane string) []links.Link {
@@ -76,22 +76,21 @@ func (s *Scanner) paneLinks(ctx context.Context, pane string) []links.Link {
 	if len(visible) == 0 {
 		return nil
 	}
-	// Viewport-only: scrollback is fetched only for a wrapped URL.
+	// Scrollback is fetched only for a wrapped URL.
 	var known map[string]bool
 	if needsUnwrapped(visible) {
 		known = links.Known(strings.Join(s.read(ctx, pane, herdr.SourceUnwrapped, scrollbackLines), "\n"))
 	}
-	found := links.Merge(links.FromLines(visible, known), hidden)
+	found := links.Merge(visible, links.FromLines(visible, known), hidden)
 	for i := range found {
 		found[i].Pane = pane
 	}
 	return found
 }
 
-// needsUnwrapped mirrors the carry in links.FromLines, which is when the
-// scrollback index is consulted. It matches on the raw end, not the
-// cleaned one: whether a trailing "." ends a URL or ends a sentence is
-// the very thing only scrollback can settle.
+// needsUnwrapped mirrors the carry in links.FromLines. It matches on the
+// raw end, not the cleaned one: whether a trailing "." ends a URL or ends
+// a sentence is the very thing only scrollback can settle.
 func needsUnwrapped(visible []string) bool {
 	for i, line := range visible {
 		if i+1 >= len(visible) {
@@ -114,9 +113,28 @@ func (s *Scanner) read(ctx context.Context, pane, source string, lines int) []st
 	return text
 }
 
-// Locate re-resolves a link's cell just before opening it, because output
-// may have scrolled while the user was typing. shift accounts for new
-// lines; a fresh read confirms the target is still there.
+// stillThere reports whether a link's own text is still at the cell it was
+// hinted on, once shift has moved it to row.
+func stillThere(visible []string, choice links.Link, row int) bool {
+	if choice.Text == "" || row < 0 || row >= len(visible) {
+		return false
+	}
+	line := visible[row]
+	for at := 0; at < len(line); {
+		i := strings.Index(line[at:], choice.Text)
+		if i < 0 {
+			return false
+		}
+		if cells.Column(line, at+i) == choice.Col {
+			return true
+		}
+		at += i + len(choice.Text)
+	}
+	return false
+}
+
+// Locate re-resolves a link's cell just before opening it: output may have
+// scrolled while the user was typing.
 func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row, col int, ok bool) {
 	shifted := choice.Row - shift
 	if shift != 0 && shifted >= 0 && choice.Kind == links.Text {
@@ -124,11 +142,16 @@ func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row
 	}
 
 	visible := s.read(ctx, choice.Pane, herdr.SourceVisible, 0)
+	// The same anchor can sit in several places, so the cell the hint was
+	// drawn on beats the first match anywhere.
+	if stillThere(visible, choice, shifted) {
+		return shifted, choice.Col, true
+	}
 	if choice.Kind == links.Text {
 		for i, line := range visible {
 			for _, m := range links.FindAll(line) {
 				if links.Normalize(m.URL) == choice.URL {
-					return i, m.Start, true
+					return i, cells.Column(line, m.Start), true
 				}
 			}
 		}
@@ -138,7 +161,7 @@ func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row
 	if choice.Text != "" {
 		for i, line := range visible {
 			if at := strings.Index(line, choice.Text); at >= 0 {
-				return i, at, true
+				return i, cells.Column(line, at), true
 			}
 		}
 	}

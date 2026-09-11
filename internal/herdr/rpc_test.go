@@ -23,8 +23,8 @@ func socketPath(t *testing.T) string {
 	return filepath.Join(dir, "s.sock")
 }
 
-// fakeServer answers one connection with the lines reply produces, then
-// closes. reply sees the decoded request so it can echo or ignore the id.
+// fakeServer answers one connection with reply's lines, then closes. reply
+// sees the decoded request so it can echo the id.
 func fakeServer(t *testing.T, reply func(request map[string]any) [][]byte) string {
 	t.Helper()
 	socket := socketPath(t)

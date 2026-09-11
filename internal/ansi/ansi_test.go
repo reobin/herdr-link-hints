@@ -80,3 +80,16 @@ func TestParseLinksHugeParameterFallsBack(t *testing.T) {
 		t.Fatalf("ParseLinks() = %+v, want a link at row 0", got)
 	}
 }
+
+// A wide character before a link moves the cursor two columns, not one.
+func TestParseLinksCountsWideCharactersAsTwoColumns(t *testing.T) {
+	t.Parallel()
+	stream := "日本\x1b]8;;https://a.io/x\x07docs\x1b]8;;\x07"
+	got := ParseLinks([]byte(stream))
+	if len(got) != 1 {
+		t.Fatalf("ParseLinks() = %+v, want one link", got)
+	}
+	if got[0].Col != 4 {
+		t.Fatalf("ParseLinks() col = %d, want 4", got[0].Col)
+	}
+}
