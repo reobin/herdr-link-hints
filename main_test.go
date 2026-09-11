@@ -135,3 +135,13 @@ func TestGrownBy(t *testing.T) {
 		t.Fatalf("clampGrowth() = %d, want no negative shift", got)
 	}
 }
+
+func TestProvisionalTitle(t *testing.T) {
+	t.Parallel()
+	if got := provisionalTitle([]string{"w1:p1", "w1:p2"}, "w1:p1"); got != "2 panes" {
+		t.Fatalf("provisionalTitle() = %q", got)
+	}
+	if got := provisionalTitle([]string{"w1:p1"}, "w1:p1"); got != "pane w1:p1" {
+		t.Fatalf("provisionalTitle() = %q", got)
+	}
+}

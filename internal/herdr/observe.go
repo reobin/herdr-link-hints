@@ -16,12 +16,15 @@ import (
 const (
 	// Herdr replays a repaint as soon as the stream opens, so silence this
 	// long means there is nothing to see.
-	firstFrameWait = 600 * time.Millisecond
+	firstFrameWait = 250 * time.Millisecond
 	// A repaint arrives as a burst; this much quiet ends it.
-	quietAfterFrame = 120 * time.Millisecond
+	quietAfterFrame = 50 * time.Millisecond
 	// Hard stop, so a chatty pane cannot hold the picker open.
-	observeLimit = 2 * time.Second
-	maxFrameSize = 4 << 20
+	observeLimit = 800 * time.Millisecond
+	// Below this size a frame is a heartbeat, not a repaint: it must not
+	// reset the quiet timer.
+	minContentFrame = 512
+	maxFrameSize    = 4 << 20
 )
 
 // ObserveOSC8 is the only way to see a link whose URL never appears as
@@ -62,7 +65,9 @@ func (c *Client) ObserveOSC8(ctx context.Context, pane string) ([]ansi.Link, err
 				return ansi.ParseLinks(stream), nil
 			}
 			stream = append(stream, frame...)
-			resetTimer(timer, quietAfterFrame)
+			if len(frame) >= minContentFrame {
+				resetTimer(timer, quietAfterFrame)
+			}
 		case <-timer.C:
 			return ansi.ParseLinks(stream), nil
 		}
