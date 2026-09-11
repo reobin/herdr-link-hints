@@ -58,13 +58,15 @@ func run() int {
 	term.Flush()
 
 	var (
-		labels  map[string]string
-		offsets map[string]int
-		found   []links.Link
-		wg      sync.WaitGroup
+		labels map[string]string
+		found  []links.Link
+		wg     sync.WaitGroup
 	)
 	scanner := &scan.Scanner{Source: client, Log: log, SkipObserve: os.Getenv("HINTS_NO_OBSERVE") != ""}
-	wg.Add(3)
+	// Must precede the snapshot it is compared against: sampled after, it
+	// under-counts growth and Locate returns an unverified row.
+	offsets := scrollOffsets(ctx, client, panes, log)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		var err error
@@ -72,10 +74,6 @@ func run() int {
 		if err != nil {
 			log.Debug("pane list failed", "error", err)
 		}
-	}()
-	go func() {
-		defer wg.Done()
-		offsets = scrollOffsets(ctx, client, panes, log)
 	}()
 	go func() {
 		defer wg.Done()
