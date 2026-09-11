@@ -1,0 +1,50 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      # install.sh derives the download URL from the manifest version, so a
+      # mismatch here would ship a release nobody can install.
+      - name: check manifest version matches tag
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' herdr-plugin.toml | head -1)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "manifest version $version does not match tag $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+      # CGO_ENABLED=0 matters: linux/amd64 is a native build here, so cgo
+      # would default on and the net package would link glibc dynamically,
+      # breaking musl distros. Nothing here needs libc.
+      - name: build
+        env:
+          CGO_ENABLED: 0
+          # armv6 so the 32-bit build runs on Pi 1/Zero as well as armv7.
+          GOARM: 6
+        run: |
+          mkdir -p dist
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 linux/arm; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "dist/picker-$os-$arch" .
+          done
+          cd dist && sha256sum picker-* > checksums.txt
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
