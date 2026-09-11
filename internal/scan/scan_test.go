@@ -22,12 +22,19 @@ type fakeSource struct {
 
 	mu       sync.Mutex
 	observed map[string]int
+	reads    map[[2]string]int
 }
 
 func (f *fakeSource) PaneLines(_ context.Context, pane, source string, _ int) ([]string, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.reads == nil {
+		f.reads = map[[2]string]int{}
+	}
+	f.reads[[2]string{pane, source}]++
 	return f.text[[2]string{pane, source}], nil
 }
 
@@ -45,6 +52,12 @@ func (f *fakeSource) observeCount(pane string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.observed[pane]
+}
+
+func (f *fakeSource) readCount(pane, source string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads[[2]string{pane, source}]
 }
 
 func newScanner(source Source) *Scanner {
@@ -160,6 +173,60 @@ func TestLocate(t *testing.T) {
 			row, col, ok := newScanner(source).Locate(context.Background(), tc.choice, tc.shift)
 			if ok != tc.wantOK || (ok && (row != tc.wantRow || col != tc.wantCol)) {
 				t.Fatalf("Locate() = %d, %d, %v; want %d, %d, %v", row, col, ok, tc.wantRow, tc.wantCol, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestLinksSkipsScrollbackWithoutWrappedURLs(t *testing.T) {
+	t.Parallel()
+	source := &fakeSource{text: paneText("w1:p1", "go https://a.io/x here")}
+	scanner := newScanner(source)
+	scanner.SkipObserve = true
+	got := scanner.Links(context.Background(), []string{"w1:p1"})
+	if len(got) != 1 || got[0].URL != "https://a.io/x" {
+		t.Fatalf("Links() = %+v", got)
+	}
+	if n := source.readCount("w1:p1", herdr.SourceUnwrapped); n != 0 {
+		t.Fatalf("unwrapped reads = %d, want none without a wrapped URL", n)
+	}
+}
+
+func TestLinksCompletesWrappedURLFromScrollback(t *testing.T) {
+	t.Parallel()
+	source := &fakeSource{text: map[[2]string][]string{
+		{"w1:p1", herdr.SourceVisible}:   {"go https://a.io/long-ur", "l-continued here"},
+		{"w1:p1", herdr.SourceUnwrapped}: {"go https://a.io/long-url-continued here"},
+	}}
+	scanner := newScanner(source)
+	scanner.SkipObserve = true
+	got := scanner.Links(context.Background(), []string{"w1:p1"})
+	if len(got) != 1 || got[0].URL != "https://a.io/long-url-continued" {
+		t.Fatalf("Links() = %+v", got)
+	}
+	if n := source.readCount("w1:p1", herdr.SourceUnwrapped); n != 1 {
+		t.Fatalf("unwrapped reads = %d, want 1 for a wrapped URL", n)
+	}
+}
+
+func TestNeedsUnwrapped(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		visible []string
+		want    bool
+	}{
+		{name: "no urls", visible: []string{"nothing here", "either"}, want: false},
+		{name: "complete url mid-line", visible: []string{"go https://a.io/x here", "next"}, want: false},
+		{name: "complete url at end of last line", visible: []string{"go https://a.io/x"}, want: false},
+		{name: "url plus prose punctuation at edge", visible: []string{"see https://a.io/x.", "next"}, want: false},
+		{name: "url wrapped across lines", visible: []string{"go https://a.io/long-ur", "l-continued"}, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := needsUnwrapped(tc.visible); got != tc.want {
+				t.Fatalf("needsUnwrapped(%q) = %v, want %v", tc.visible, got, tc.want)
 			}
 		})
 	}
