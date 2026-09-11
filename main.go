@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/reobin/herdr-link-hints/internal/browse"
@@ -51,19 +52,38 @@ func run() int {
 	if err != nil {
 		log.Debug("pane layout failed", "pane", focused, "error", err)
 	}
-	labels, err := client.PaneLabels(ctx, panes)
-	if err != nil {
-		log.Debug("pane list failed", "error", err)
-	}
-	title := screenTitle(panes, labels, focused)
 
 	term.Clear()
-	term.Printf("Scanning %s for links...\n", title)
+	term.Printf("Scanning %s for links...\n", provisionalTitle(panes, focused))
 	term.Flush()
 
-	offsets := scrollOffsets(ctx, client, panes, log)
+	var (
+		labels  map[string]string
+		offsets map[string]int
+		found   []links.Link
+		wg      sync.WaitGroup
+	)
 	scanner := &scan.Scanner{Source: client, Log: log, SkipObserve: os.Getenv("HINTS_NO_OBSERVE") != ""}
-	found := scanner.Links(ctx, panes)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		var err error
+		labels, err = client.PaneLabels(ctx, panes)
+		if err != nil {
+			log.Debug("pane list failed", "error", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		offsets = scrollOffsets(ctx, client, panes, log)
+	}()
+	go func() {
+		defer wg.Done()
+		found = scanner.Links(ctx, panes)
+	}()
+	wg.Wait()
+
+	title := screenTitle(panes, labels, focused)
 	if len(found) == 0 {
 		term.Pause(fmt.Sprintf("Link hints: no links on screen (%s).", title))
 		return exitCancelled
@@ -122,6 +142,13 @@ func newLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
+func provisionalTitle(panes []string, focused string) string {
+	if len(panes) > 1 {
+		return fmt.Sprintf("%d panes", len(panes))
+	}
+	return "pane " + focused
+}
+
 func screenTitle(panes []string, labels map[string]string, focused string) string {
 	if len(panes) > 1 {
 		return fmt.Sprintf("%d panes", len(panes))
@@ -149,13 +176,24 @@ func itemsFor(found []links.Link, labels map[string]string, showPane bool) []ui.
 
 func scrollOffsets(ctx context.Context, client *herdr.Client, panes []string, log *slog.Logger) map[string]int {
 	offsets := make(map[string]int, len(panes))
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
 	for _, pane := range panes {
-		offset, err := client.ScrollOffset(ctx, pane)
-		if err != nil {
-			log.Debug("scroll offset failed", "pane", pane, "error", err)
-		}
-		offsets[pane] = offset
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			offset, err := client.ScrollOffset(ctx, pane)
+			if err != nil {
+				log.Debug("scroll offset failed", "pane", pane, "error", err)
+			}
+			mu.Lock()
+			offsets[pane] = offset
+			mu.Unlock()
+		}()
 	}
+	wg.Wait()
 	return offsets
 }
 

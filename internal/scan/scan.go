@@ -50,19 +50,14 @@ func (s *Scanner) Links(ctx context.Context, panes []string) []links.Link {
 
 func (s *Scanner) paneLinks(ctx context.Context, pane string) []links.Link {
 	var (
-		visible    []string
-		scrollback []string
-		hidden     []ansi.Link
-		wg         sync.WaitGroup
+		visible []string
+		hidden  []ansi.Link
+		wg      sync.WaitGroup
 	)
-	wg.Add(3)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		visible = s.read(ctx, pane, herdr.SourceVisible, 0)
-	}()
-	go func() {
-		defer wg.Done()
-		scrollback = s.read(ctx, pane, herdr.SourceUnwrapped, scrollbackLines)
 	}()
 	go func() {
 		defer wg.Done()
@@ -81,12 +76,33 @@ func (s *Scanner) paneLinks(ctx context.Context, pane string) []links.Link {
 	if len(visible) == 0 {
 		return nil
 	}
-	known := links.Known(strings.Join(scrollback, "\n"))
+	// Viewport-only: scrollback is fetched only for a wrapped URL.
+	var known map[string]bool
+	if needsUnwrapped(visible) {
+		known = links.Known(strings.Join(s.read(ctx, pane, herdr.SourceUnwrapped, scrollbackLines), "\n"))
+	}
 	found := links.Merge(links.FromLines(visible, known), hidden)
 	for i := range found {
 		found[i].Pane = pane
 	}
 	return found
+}
+
+// needsUnwrapped is true only when a visible line ends mid-URL, the one
+// case where scrollback changes the result. Trailing prose punctuation
+// (".../x.") does not count.
+func needsUnwrapped(visible []string) bool {
+	for i, line := range visible {
+		if i+1 >= len(visible) {
+			break
+		}
+		for _, m := range links.FindAll(line) {
+			if m.Start+len(links.Clean(m.Raw)) == len(line) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Scanner) read(ctx context.Context, pane, source string, lines int) []string {
