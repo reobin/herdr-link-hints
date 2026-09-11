@@ -1,0 +1,21 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - gocritic
+    - misspell
+    - revive
+    - unconvert
+    - usestdlibvars
+  settings:
+    revive:
+      # No `exported` rule: these are internal packages with no godoc
+      # audience, and a doc comment per symbol is noise here.
+      rules:
+        - name: package-comments
+
+formatters:
+  enable:
+    - gofmt
