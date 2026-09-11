@@ -16,6 +16,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
 
       # install.sh derives the download URL from the manifest version, so a
       # mismatch here would ship a release nobody can install.
