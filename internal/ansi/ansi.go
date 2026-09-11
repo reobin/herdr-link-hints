@@ -7,11 +7,13 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/reobin/herdr-link-hints/internal/cells"
 )
 
-// Link is a completed OSC 8 hyperlink. Row and Col are 0-based from the
-// stream's origin: Herdr homes the cursor when it replays a repaint, so
-// they line up with viewport coordinates.
+// Link is a completed OSC 8 hyperlink. Row and Col are 0-based cells from
+// the stream's origin: Herdr opens an observe stream with ESC[2J ESC[1;1H,
+// so they line up with viewport coordinates.
 type Link struct {
 	URL   string
 	Row   int
@@ -145,7 +147,7 @@ func (c *cursor) writeText(chunk string, open *pending) {
 			// Other control characters do not move the cursor.
 		default:
 			open.write(ch, c.row, c.col)
-			c.col++
+			c.col += cells.Width(string(ch))
 		}
 	}
 }
