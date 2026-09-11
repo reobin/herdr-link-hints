@@ -7,6 +7,7 @@ import (
 
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
+	"github.com/reobin/herdr-link-hints/internal/overlay"
 )
 
 func TestTarget(t *testing.T) {
@@ -85,15 +86,16 @@ func TestItemsFor(t *testing.T) {
 	}
 	labels := map[string]string{"w1:p1": "neon"}
 
-	got := itemsFor(found, labels, true)
+	codes := []string{"a", "s"}
+	got := itemsFor(found, codes, labels, true)
 	if got[0].Where != "neon" || got[1].Where != "w1:p2" {
 		t.Fatalf("itemsFor() panes = %q, %q", got[0].Where, got[1].Where)
 	}
-	if codes := []string{got[0].Code, got[1].Code}; !reflect.DeepEqual(codes, []string{"a", "s"}) {
-		t.Fatalf("itemsFor() codes = %+v", codes)
+	if assigned := []string{got[0].Code, got[1].Code}; !reflect.DeepEqual(assigned, codes) {
+		t.Fatalf("itemsFor() codes = %+v", assigned)
 	}
 
-	single := itemsFor(found, labels, false)
+	single := itemsFor(found, codes, labels, false)
 	if single[0].Where != "" || single[1].Where != "" {
 		t.Fatal("a single-pane screen should not label rows with a pane")
 	}
@@ -136,12 +138,123 @@ func TestGrownBy(t *testing.T) {
 	}
 }
 
-func TestProvisionalTitle(t *testing.T) {
+func TestPaneIDs(t *testing.T) {
 	t.Parallel()
-	if got := provisionalTitle([]string{"w1:p1", "w1:p2"}, "w1:p1"); got != "2 panes" {
-		t.Fatalf("provisionalTitle() = %q", got)
+	got := paneIDs([]herdr.Pane{{ID: "w1:p1", Width: 206, Height: 59}, {ID: "w1:p2"}})
+	if want := []string{"w1:p1", "w1:p2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("paneIDs() = %+v, want %+v", got, want)
 	}
-	if got := provisionalTitle([]string{"w1:p1"}, "w1:p1"); got != "pane w1:p1" {
-		t.Fatalf("provisionalTitle() = %q", got)
+}
+
+func TestBadgesForGroupsByPane(t *testing.T) {
+	t.Parallel()
+	found := []links.Link{
+		{Row: 2, Col: 4, Before: 3, Text: "abcd", Pane: "w1:p1"},
+		{Row: 9, Col: 0, Text: "ab", Pane: "w1:p2"},
+		{Row: 3, Col: 7, Before: 1, Text: "abc", Pane: "w1:p1"},
 	}
+	codes := []string{"a", "s", "d"}
+
+	all := badgesFor(found, codes, []int{0, 1, 2})
+	want := map[string][]overlay.Badge{
+		"w1:p1": {
+			{Row: 2, Col: 4, Before: 3, Width: 4, Code: "a"},
+			{Row: 3, Col: 7, Before: 1, Width: 3, Code: "d"},
+		},
+		"w1:p2": {{Row: 9, Col: 0, Width: 2, Code: "s"}},
+	}
+	if !reflect.DeepEqual(all, want) {
+		t.Fatalf("badgesFor() = %+v, want %+v", all, want)
+	}
+}
+
+// Narrowing fades the hints it rules out instead of dropping them.
+func TestBadgesForFadesTheRestWhenNarrowing(t *testing.T) {
+	t.Parallel()
+	found := []links.Link{
+		{Row: 2, Col: 4, Text: "ab", Pane: "w1:p1"},
+		{Row: 9, Col: 0, Text: "ab", Pane: "w1:p1"},
+	}
+	got := badgesFor(found, []string{"a", "s"}, []int{1})
+	if len(got["w1:p1"]) != 2 {
+		t.Fatalf("badgesFor() = %+v, want both links kept", got)
+	}
+	if !got["w1:p1"][0].Dim {
+		t.Fatal("the ruled-out hint should be dimmed")
+	}
+	if got["w1:p1"][1].Dim {
+		t.Fatal("the matching hint should stay bright")
+	}
+}
+
+func TestContentStripsThePaneBorder(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		pane         herdr.Pane
+		viewportRows int
+		want         overlay.Size
+	}{
+		// The live numbers this was calibrated against.
+		{"bordered", herdr.Pane{Width: 206, Height: 59}, 57, overlay.Size{Cols: 204, Rows: 57}},
+		{"borderless", herdr.Pane{Width: 80, Height: 24}, 24, overlay.Size{Cols: 80, Rows: 24}},
+		{"unknown viewport", herdr.Pane{Width: 80, Height: 24}, 0, overlay.Size{Cols: 80, Rows: 24}},
+		{"viewport larger than the rect", herdr.Pane{Width: 80, Height: 24}, 99, overlay.Size{Cols: 80, Rows: 24}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := content(tc.pane, tc.viewportRows); got != tc.want {
+				t.Fatalf("content(%+v, %d) = %+v, want %+v", tc.pane, tc.viewportRows, got, tc.want)
+			}
+		})
+	}
+}
+
+// Not parallel: these cases set environment variables.
+func TestPaneShape(t *testing.T) {
+	t.Run("annotate gets one line of status", func(t *testing.T) {
+		width, height := paneShape(modeAnnotate)
+		if width != "22" || height != "5" {
+			t.Fatalf("paneShape(%q) = %q, %q", modeAnnotate, width, height)
+		}
+	})
+	t.Run("the list fallback keeps room for a list", func(t *testing.T) {
+		width, height := paneShape(modeList)
+		if width != "80%" || height != "60%" {
+			t.Fatalf("paneShape(%q) = %q, %q", modeList, width, height)
+		}
+	})
+	t.Run("the environment overrides both", func(t *testing.T) {
+		t.Setenv("HINTS_WIDTH", "40")
+		t.Setenv("HINTS_HEIGHT", "10")
+		width, height := paneShape(modeAnnotate)
+		if width != "40" || height != "10" {
+			t.Fatalf("paneShape(%q) = %q, %q", modeAnnotate, width, height)
+		}
+	})
+}
+
+// Not parallel: these cases set environment variables.
+func TestPaneFor(t *testing.T) {
+	t.Run("annotate gets a popup sized for one line", func(t *testing.T) {
+		got := paneFor(modeAnnotate)
+		if got.Placement != "popup" || got.Width != "22" || got.Height != "5" {
+			t.Fatalf("paneFor(%q) = %+v", modeAnnotate, got)
+		}
+	})
+	t.Run("the list fallback stays a sized popup", func(t *testing.T) {
+		got := paneFor(modeList)
+		if got.Placement != "popup" || got.Width != "80%" || got.Height != "60%" {
+			t.Fatalf("paneFor(%q) = %+v", modeList, got)
+		}
+	})
+	// Only a popup takes a size, so any other placement must ask for none.
+	t.Run("the environment overrides the placement", func(t *testing.T) {
+		t.Setenv("HINTS_PLACEMENT", "overlay")
+		got := paneFor(modeAnnotate)
+		if got.Placement != "overlay" || got.Width != "" || got.Height != "" {
+			t.Fatalf("paneFor() = %+v", got)
+		}
+	})
 }

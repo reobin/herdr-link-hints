@@ -4,8 +4,11 @@ package links
 import (
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/reobin/herdr-link-hints/internal/ansi"
+	"github.com/reobin/herdr-link-hints/internal/cells"
 )
 
 // Kind decides how a link can be found again later: plain text can be
@@ -22,8 +25,11 @@ type Link struct {
 	Text string // what the screen shows
 	Kind Kind
 	Row  int // 0-based viewport row
-	Col  int // 0-based column
+	Col  int // 0-based display column, not a byte offset
 	Pane string
+	// Before counts the blank cells left of the link, which is the room a
+	// hint has beside it.
+	Before int
 }
 
 // Visible holds a URL as it appears on screen, so it can be searched for
@@ -123,7 +129,7 @@ func FromLines(lines []string, known map[string]bool) []Visible {
 			skip = len(line)
 		}
 		for _, m := range FindAll(line[skip:]) {
-			start := skip + m.Start
+			start := cells.Column(line, skip+m.Start)
 			if skip+m.End == len(line) && i+1 < len(lines) {
 				carried = &Visible{Match: m.Raw, Row: i, Col: start}
 				continue
@@ -174,30 +180,86 @@ type cell struct {
 	col int
 }
 
-// Merge lets hidden links win on a shared cell or a shared target: their
-// URL is the real destination, the text beside it only a label.
-func Merge(visible []Visible, hidden []ansi.Link) []Link {
+// maxAnchorHits caps how often one hidden link may be marked, so a label as
+// short as "#2" cannot flood a screen with hints.
+const maxAnchorHits = 8
+
+// Merge places a hidden link by searching the visible text for its anchor:
+// the observe stream can be smaller and staler than the pane, so its own
+// coordinates are the last resort. Every occurrence is marked.
+func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 	var out []Link
-	takenCells := map[cell]bool{}
-	takenURLs := map[string]bool{}
-	for _, h := range hidden {
-		at := cell{h.Row, h.Col}
-		if takenCells[at] {
-			continue
+	taken := map[cell]bool{}
+	add := func(link Link) {
+		at := cell{link.Row, link.Col}
+		if taken[at] {
+			return
 		}
-		takenCells[at] = true
-		takenURLs[h.URL] = true
-		out = append(out, Link{URL: h.URL, Text: anchorText(h), Kind: OSC8, Row: h.Row, Col: h.Col})
+		taken[at] = true
+		link.Before = blanksBefore(lines, link.Row, link.Col)
+		out = append(out, link)
+	}
+	for _, h := range hidden {
+		anchor := anchorText(h)
+		at := anchorCells(lines, anchor)
+		if len(at) == 0 {
+			at = []cell{{h.Row, h.Col}}
+		}
+		for _, c := range at {
+			add(Link{URL: h.URL, Text: anchor, Kind: OSC8, Row: c.row, Col: c.col})
+		}
 	}
 	for _, v := range visible {
-		url := Normalize(v.Match)
-		if takenCells[cell{v.Row, v.Col}] || takenURLs[url] {
-			continue
-		}
-		takenCells[cell{v.Row, v.Col}] = true
-		out = append(out, Link{URL: url, Text: v.Match, Kind: Text, Row: v.Row, Col: v.Col})
+		add(Link{URL: Normalize(v.Match), Text: v.Match, Kind: Text, Row: v.Row, Col: v.Col})
 	}
 	return out
+}
+
+func anchorCells(lines []string, anchor string) []cell {
+	if anchor == "" {
+		return nil
+	}
+	var out []cell
+	for row, line := range lines {
+		for at := 0; at < len(line); {
+			i := strings.Index(line[at:], anchor)
+			if i < 0 {
+				break
+			}
+			if !wholeToken(line, anchor, at+i) {
+				at += i + len(anchor)
+				continue
+			}
+			out = append(out, cell{row, cells.Column(line, at+i)})
+			if len(out) == maxAnchorHits {
+				return out
+			}
+			at += i + len(anchor)
+		}
+	}
+	return out
+}
+
+// blanksBefore counts the empty cells immediately left of a link, which is
+// where its hint can sit without covering the link itself.
+func blanksBefore(lines []string, row, col int) int {
+	if row < 0 || row >= len(lines) || col <= 0 {
+		return 0
+	}
+	blanks, column := 0, 0
+	for _, r := range lines[row] {
+		if column >= col {
+			break
+		}
+		if r == ' ' {
+			blanks++
+		} else {
+			blanks = 0
+		}
+		column += cells.Width(string(r))
+	}
+	// A link past the end of the text has nothing but blanks before it.
+	return blanks + max(col-column, 0)
 }
 
 func anchorText(h ansi.Link) string {
@@ -207,19 +269,20 @@ func anchorText(h ansi.Link) string {
 	return h.URL
 }
 
-// Dedupe gives one URL one hint, however often the screen repeats it.
-func Dedupe(in []Link) []Link {
-	seen := make(map[string]bool, len(in))
-	out := make([]Link, 0, len(in))
-	for _, l := range in {
-		if seen[l.URL] {
-			continue
-		}
-		seen[l.URL] = true
-		out = append(out, l)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+// wholeToken rejects an anchor that is only part of a longer run of text, so
+// a link labelled #1 does not claim the #1 inside #123.
+func wholeToken(line, anchor string, start int) bool {
+	first, _ := utf8.DecodeRuneInString(anchor)
+	last, _ := utf8.DecodeLastRuneInString(anchor)
+	before, _ := utf8.DecodeLastRuneInString(line[:start])
+	after, _ := utf8.DecodeRuneInString(line[start+len(anchor):])
+	return breaks(before, first) && breaks(last, after)
+}
+
+func breaks(left, right rune) bool {
+	return !wordRune(left) || !wordRune(right)
+}
+
+func wordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }

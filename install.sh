@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Build step for `herdr plugin install`: fetch the prebuilt picker binary
-# for this platform. The version comes from the manifest rather than git,
-# so it works in a shallow clone.
+# Build step for `herdr plugin install`: fetch the prebuilt picker binary.
+# The version comes from the manifest, so it works in a shallow clone.
 set -euo pipefail
 
 repo="reobin/herdr-link-hints"

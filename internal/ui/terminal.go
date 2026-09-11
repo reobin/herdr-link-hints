@@ -10,9 +10,25 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
-const fallbackRows = 24
+const (
+	fallbackRows = 24
+	fallbackCols = 80
+)
+
+// Every colour query goes out before anything is read, so one deadline
+// covers the lot. maxReply fits rgb: components of any width.
+const (
+	themeWait = 150 * time.Millisecond
+	maxReply  = 64
+)
+
+const spinnerTick = 90 * time.Millisecond
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // Terminal reads single keystrokes in raw mode on a tty, and whole lines
 // otherwise, which keeps the picker scriptable and testable.
@@ -22,11 +38,12 @@ type Terminal struct {
 	lines   *bufio.Reader
 	restore func()
 	rows    int
+	cols    int
 }
 
 // Open must be paired with Close to put the terminal back.
 func Open(in *os.File, out io.Writer) *Terminal {
-	t := &Terminal{out: bufio.NewWriter(out), rows: fallbackRows}
+	t := &Terminal{out: bufio.NewWriter(out), rows: fallbackRows, cols: fallbackCols}
 	restore, err := enterRaw(in)
 	if err != nil {
 		t.lines = bufio.NewReader(in)
@@ -34,15 +51,67 @@ func Open(in *os.File, out io.Writer) *Terminal {
 	}
 	t.restore = restore
 	t.keys = readBytes(in)
-	if rows, ok := screenRows(in); ok {
-		t.rows = rows
+	// Nothing here is typed into, so a blinking cursor only invites it.
+	t.hideCursor()
+	if rows, cols, ok := screenSize(in); ok {
+		t.rows, t.cols = rows, cols
 	}
 	return t
 }
 
 func (t *Terminal) interactive() bool { return t.keys != nil }
 
+// Size is what the pane actually got, not what was asked for.
+func (t *Terminal) Size() (rows, cols int) { return t.rows, t.cols }
+
+// Theme asks the terminal what colours it is painted in, falling back to
+// black and white when it does not answer.
+func (t *Terminal) Theme() theme.Colors {
+	colors := theme.Fallback()
+	if !t.interactive() {
+		return colors
+	}
+	for _, key := range theme.Keys {
+		_, _ = fmt.Fprint(t.out, theme.Query(key))
+	}
+	t.Flush()
+	deadline := time.Now().Add(themeWait)
+	for range theme.Keys {
+		reply, ok := t.readReply(deadline)
+		if !ok {
+			break
+		}
+		if key, rgb, ok := theme.Parse(reply); ok {
+			colors.Set(key, rgb)
+		}
+	}
+	return colors
+}
+
+// readReply collects one OSC report, which ends at either BEL or ST.
+func (t *Terminal) readReply(deadline time.Time) (string, bool) {
+	var reply strings.Builder
+	for reply.Len() < maxReply {
+		wait := time.Until(deadline)
+		if wait <= 0 {
+			return "", false
+		}
+		b, ok := t.nextByte(wait)
+		if !ok {
+			return "", false
+		}
+		reply.WriteByte(b)
+		if b == '\a' || strings.HasSuffix(reply.String(), "\x1b\\") {
+			return reply.String(), true
+		}
+	}
+	return "", false
+}
+
 func (t *Terminal) Close() {
+	if t.restore != nil {
+		t.showCursor()
+	}
 	_ = t.out.Flush()
 	if t.restore != nil {
 		t.restore()
@@ -60,26 +129,59 @@ func (t *Terminal) Clear() {
 
 func (t *Terminal) Flush() { _ = t.out.Flush() }
 
+// Spin animates a label until stop is called, and is the only writer to
+// the terminal in the meantime.
+func (t *Terminal) Spin(label string) (stop func()) {
+	if !t.interactive() {
+		t.Printf("%s\n", label)
+		t.Flush()
+		return func() {}
+	}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(spinnerTick)
+		defer ticker.Stop()
+		for frame := 0; ; frame++ {
+			t.centred(line{{text: spinnerFrames[frame%len(spinnerFrames)] + " " + label, sgr: "2"}})
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-stopped
+	}
+}
+
+func (t *Terminal) hideCursor() { _, _ = fmt.Fprint(t.out, "\x1b[?25l") }
+
+func (t *Terminal) showCursor() { _, _ = fmt.Fprint(t.out, "\x1b[?25h") }
+
 // crlf compensates for raw mode, which does not translate newlines.
 func crlf(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
 }
 
 // Pause waits for any key, so an error stays readable before a popup pane
-// closes.
+// closes. It takes the pane over rather than printing over the spinner.
 func (t *Terminal) Pause(message string) {
-	t.Printf("%s\n", message)
-	t.Flush()
-	if t.interactive() {
-		t.readKey()
+	if !t.interactive() {
+		t.Printf("%s\n", message)
+		t.Flush()
+		_, _ = t.lines.ReadString('\n')
 		return
 	}
-	_, _ = t.lines.ReadString('\n')
+	t.centred(line{{text: message, sgr: "2"}})
+	t.readKey()
 }
 
 // enterRaw runs stty against the real terminal: Go hands a child
-// /dev/null when Stdin is nil, and `stty -g` then fails with "stdin isn't
-// a terminal". Twice per session, not twice per keystroke.
+// /dev/null when Stdin is nil, and `stty -g` then fails.
 func enterRaw(tty *os.File) (func(), error) {
 	saved, err := stty(tty, "-g")
 	if err != nil {
@@ -98,20 +200,21 @@ func stty(tty *os.File, args ...string) (string, error) {
 	return string(out), err
 }
 
-func screenRows(tty *os.File) (int, bool) {
+func screenSize(tty *os.File) (rows, cols int, ok bool) {
 	out, err := stty(tty, "size")
 	if err != nil {
-		return 0, false
+		return 0, 0, false
 	}
 	fields := strings.Fields(out)
 	if len(fields) != 2 {
-		return 0, false
+		return 0, 0, false
 	}
-	rows, err := strconv.Atoi(fields[0])
-	if err != nil || rows <= 0 {
-		return 0, false
+	rows, rowErr := strconv.Atoi(fields[0])
+	cols, colErr := strconv.Atoi(fields[1])
+	if rowErr != nil || colErr != nil || rows <= 0 || cols <= 0 {
+		return 0, 0, false
 	}
-	return rows, true
+	return rows, cols, true
 }
 
 // readBytes streams one byte at a time, so a read can be given a deadline

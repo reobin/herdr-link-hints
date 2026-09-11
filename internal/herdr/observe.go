@@ -25,8 +25,7 @@ const (
 )
 
 // ObserveOSC8 is the only way to see a link whose URL never appears as
-// text, since snapshots strip OSC 8 targets. The stream is closed before
-// returning: nothing runs between keypresses.
+// text: snapshots strip OSC 8 targets. The stream is closed before return.
 func (c *Client) ObserveOSC8(ctx context.Context, pane string) ([]ansi.Link, error) {
 	ctx, cancel := context.WithTimeout(ctx, observeLimit)
 	defer cancel()

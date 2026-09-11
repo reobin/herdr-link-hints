@@ -14,12 +14,10 @@ title = "Hint links in focused pane"
 contexts = ["pane"]
 command = ["bash", "hints-open.sh"]
 
-# The popup's shape lives here. hints-open.sh only overrides it when
-# HINTS_WIDTH or HINTS_HEIGHT is set.
+# The pane's shape is decided in `picker --open`. HINTS_WIDTH and
+# HINTS_HEIGHT override it.
 [[panes]]
 id = "picker"
 title = "Link hints"
 placement = "popup"
-width = "80%"
-height = "60%"
 command = ["./picker"]
