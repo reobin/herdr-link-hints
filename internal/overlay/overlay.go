@@ -167,7 +167,7 @@ type point struct {
 
 // clip places each badge and drops one the viewport cannot hold. A placed
 // badge joins the cells the next one prefers to avoid, which thins
-// collisions; place still covers a taken cell as a last resort.
+// collisions; place still covers a taken cell as a defensive last resort.
 func clip(badges []Badge, viewport Size) []placement {
 	taken := linkCells(badges, viewport)
 	var out []placement
@@ -213,27 +213,49 @@ func linkCells(badges []Badge, viewport Size) map[point]bool {
 	return taken
 }
 
-// place keeps a hint off every link, not just the one it marks. Covering
-// one is the last resort.
+// place keeps a hint off every link, not just the one it marks. It walks
+// outward from the link: the gutter beside it first, then the rows above
+// and below out to two away, trying the aligned column before a few
+// columns either side, and the link's own row last. Covering one is the
+// defensive last resort, unreachable in a realistic pane: the walk finds
+// a free cell long before it runs out.
 func place(b Badge, width int, viewport Size, taken map[point]bool) (row, col int) {
-	spots := make([]point, 0, 4)
+	fallback := point{b.Row, fit(b.Col, width, viewport.Cols)}
+	seen := map[point]bool{}
 	if b.Before >= width {
-		spots = append(spots, point{b.Row, b.Col - width})
+		left := point{b.Row, b.Col - width}
+		seen[left] = true
+		if free(taken, left, width) {
+			return left.row, left.col
+		}
 	}
-	if b.Row > 0 {
-		spots = append(spots, point{b.Row - 1, fit(b.Col, width, viewport.Cols)})
-	}
-	if b.Row+1 < viewport.Rows {
-		spots = append(spots, point{b.Row + 1, fit(b.Col, width, viewport.Cols)})
-	}
-	spots = append(spots, point{b.Row, fit(b.Col, width, viewport.Cols)})
-	for _, s := range spots {
+	try := func(s point) (point, bool) {
+		if seen[s] {
+			return point{}, false
+		}
+		seen[s] = true
 		if free(taken, s, width) {
+			return s, true
+		}
+		return point{}, false
+	}
+	for _, colOff := range []int{0, -1, 1, -2, 2, -3, 3} {
+		for _, rowOff := range []int{-1, 1, -2, 2} {
+			r := b.Row + rowOff
+			if r < 0 || r >= viewport.Rows {
+				continue
+			}
+			if s, ok := try(point{r, fit(b.Col+colOff, width, viewport.Cols)}); ok {
+				return s.row, s.col
+			}
+		}
+	}
+	for _, colOff := range []int{0, -1, 1, -2, 2, -3, 3} {
+		if s, ok := try(point{b.Row, fit(b.Col+colOff, width, viewport.Cols)}); ok {
 			return s.row, s.col
 		}
 	}
-	last := spots[len(spots)-1]
-	return last.row, last.col
+	return fallback.row, fallback.col
 }
 
 // fit slides a badge left so its whole code stays inside the pane.
