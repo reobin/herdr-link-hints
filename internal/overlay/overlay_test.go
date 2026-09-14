@@ -253,6 +253,31 @@ func TestPlaceKeepsTheHintOffTheLink(t *testing.T) {
 	}
 }
 
+// Two hints on the same cells read as one code that selects neither.
+func TestClipKeepsBadgesOffEachOther(t *testing.T) {
+	t.Parallel()
+	wide := Size{Cols: 80, Rows: 24}
+	// Same row, one cell apart: both want the row above, and there is not
+	// room up there for two two-character codes.
+	placed := clip([]Badge{
+		{Row: 5, Col: 10, Width: 1, Code: "as"},
+		{Row: 5, Col: 11, Width: 1, Code: "df"},
+	}, wide)
+	if len(placed) != 2 {
+		t.Fatalf("clip() placed %d badges, want 2", len(placed))
+	}
+	taken := map[point]bool{}
+	for _, p := range placed {
+		for col := p.col; col < p.col+len(p.code); col++ {
+			at := point{p.row, col}
+			if taken[at] {
+				t.Fatalf("two badges share %+v: %+v", at, placed)
+			}
+			taken[at] = true
+		}
+	}
+}
+
 func TestGlyphIsCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	lower, ok := glyph('a')
