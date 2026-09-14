@@ -129,6 +129,16 @@ func (t *Terminal) Clear() {
 
 func (t *Terminal) Flush() { _ = t.out.Flush() }
 
+// spinnerText drops the label rather than clipping it: the annotate pane is
+// a few cells wide, and half a word reads worse than none.
+func (t *Terminal) spinnerText(frame int, label string) string {
+	spinner := spinnerFrames[frame%len(spinnerFrames)]
+	if len([]rune(spinner))+1+len([]rune(label)) > t.cols {
+		return spinner
+	}
+	return spinner + " " + label
+}
+
 // Spin animates a label until stop is called, and is the only writer to
 // the terminal in the meantime.
 func (t *Terminal) Spin(label string) (stop func()) {
@@ -144,7 +154,7 @@ func (t *Terminal) Spin(label string) (stop func()) {
 		ticker := time.NewTicker(spinnerTick)
 		defer ticker.Stop()
 		for frame := 0; ; frame++ {
-			t.centred(line{{text: spinnerFrames[frame%len(spinnerFrames)] + " " + label, sgr: "2"}})
+			t.centred(line{{text: t.spinnerText(frame, label), sgr: "2"}})
 			select {
 			case <-done:
 				return

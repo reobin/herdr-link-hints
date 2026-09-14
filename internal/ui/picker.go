@@ -48,14 +48,16 @@ func Pick(t *Terminal, items []Item, opts Options) (int, bool) {
 	first := true
 	for {
 		matches := matching(items, typed)
+		// Deciding before drawing: that frame would be torn down at once,
+		// on the one keystroke the user is waiting for.
+		if len(matches) == 1 && typed != "" {
+			return matches[0], true
+		}
 		if first || typed != shown {
 			narrow(opts, matches, typed)
 			first, shown = false, typed
 		}
 		t.render(items, matches, typed, opts)
-		if len(matches) == 1 && typed != "" {
-			return matches[0], true
-		}
 		switch k := t.readKey(); k.kind {
 		case keyEnd, keyEscape:
 			return 0, false
@@ -117,26 +119,52 @@ func indices(items []Item) []int {
 
 func (t *Terminal) render(items []Item, matches []int, typed string, opts Options) {
 	if opts.Style == StyleStatus {
-		t.renderStatus(matches)
+		t.renderStatus(len(matches), typed)
 		return
 	}
 	t.renderList(items, matches, typed, opts)
 }
 
-// renderStatus is the whole of the annotate pane: the hints are on the
-// panes being annotated.
-func (t *Terminal) renderStatus(matches []int) {
-	t.centred(status(len(matches)))
+func (t *Terminal) renderStatus(matches int, typed string) {
+	t.centred(echo(typed), count(matches, t.cols))
 }
 
-// centred works from the size the pane reports: Herdr floors a popup at
-// more rows than it is given.
-func (t *Terminal) centred(l line) {
+// Blank before the first keystroke rather than a prompt glyph: the row is
+// reserved either way, which is what stops the count moving when typing
+// starts.
+func echo(typed string) line {
+	return line{{text: typed, sgr: "1"}}
+}
+
+// The theme's own yellow marks a prefix that has ruled every hint out. The
+// box is a few cells wide, so past three digits the unit goes rather than
+// wrapping onto the row below.
+func count(matches, width int) line {
+	if matches == 0 {
+		return line{{text: "no match", sgr: "33"}}
+	}
+	unit := " links"
+	if matches == 1 {
+		unit = " link"
+	}
+	number := strconv.Itoa(matches)
+	if len(number)+len(unit) > width {
+		return line{{text: number, sgr: "1"}}
+	}
+	return line{{text: number, sgr: "1"}, {text: unit, sgr: "2"}}
+}
+
+// Sized from what the pane reports, not what was asked for: Herdr floors a
+// popup at more rows than it is given.
+func (t *Terminal) centred(lines ...line) {
 	t.Clear()
-	t.Printf("%s%s%s",
-		strings.Repeat("\n", centrePad(t.rows, 1)),
-		strings.Repeat(" ", centrePad(t.cols, l.width())),
-		l)
+	t.Printf("%s", strings.Repeat("\n", topPad(t.rows, len(lines))))
+	for i, l := range lines {
+		if i > 0 {
+			t.Printf("\n")
+		}
+		t.Printf("%s%s", strings.Repeat(" ", centrePad(t.cols, l.width())), l)
+	}
 	t.Flush()
 }
 
@@ -165,21 +193,16 @@ func (l line) width() int {
 	return total
 }
 
-// status leans on the terminal's own palette: the theme's yellow takes
-// over once a prefix has ruled every hint out.
-func status(matches int) line {
-	if matches == 0 {
-		return line{{text: "no match", sgr: "33"}}
-	}
-	unit := " links"
-	if matches == 1 {
-		unit = " link"
-	}
-	return line{{text: strconv.Itoa(matches), sgr: "1"}, {text: unit, sgr: "2"}}
+// Rounding the left pad up holds the left edge still as the count gains a
+// digit.
+func centrePad(width, text int) int {
+	return max((width-text+1)/2, 0)
 }
 
-func centrePad(width, text int) int {
-	return max((width-text)/2, 0)
+// Rounding down centres the count rather than the block: it is the last
+// line, so a spare row above would carry it off the middle.
+func topPad(rows, lines int) int {
+	return max((rows-lines)/2, 0)
 }
 
 func (t *Terminal) renderList(items []Item, matches []int, typed string, opts Options) {

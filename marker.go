@@ -58,6 +58,9 @@ func content(pane herdr.Pane, viewportRows int) overlay.Size {
 	return overlay.Size{Rows: viewportRows, Cols: pane.Width - (pane.Height - viewportRows)}
 }
 
+// live reports whether there is anywhere to draw.
+func (m *marker) live() bool { return m != nil && len(m.views) > 0 }
+
 func (m *marker) draw(ctx context.Context, badges map[string][]overlay.Badge) {
 	for pane, view := range m.views {
 		frame, err := overlay.Render(overlay.Scene{
