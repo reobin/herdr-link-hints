@@ -19,27 +19,41 @@ func TestCodes(t *testing.T) {
 	}
 }
 
-// Widths at and around an exact power of the alphabet size are where
-// float-based arithmetic goes wrong.
-func TestCodesWidthAtPowerBoundaries(t *testing.T) {
+// Past the alphabet's size the shortest leaf is expanded, so codes stay
+// as short as they can be: 27 links over 26 characters is 25 singles and
+// a pair of doubles.
+func TestCodesGrowShortestFirst(t *testing.T) {
 	t.Parallel()
-	base := len(DefaultAlphabet)
-	for _, tc := range []struct{ n, width int }{
-		{base, 1},
-		{base + 1, 2},
-		{base * base, 2},
-		{base*base + 1, 3},
-		{base * base * base, 3},
-	} {
-		codes := Codes(tc.n, DefaultAlphabet)
-		if len(codes) != tc.n {
-			t.Fatalf("Codes(%d) returned %d codes", tc.n, len(codes))
+	base := len([]rune(DefaultAlphabet))
+	codes := Codes(base+1, DefaultAlphabet)
+	if len(codes) != base+1 {
+		t.Fatalf("Codes(%d) returned %d codes", base+1, len(codes))
+	}
+	singles, doubles := 0, 0
+	for _, code := range codes {
+		switch len([]rune(code)) {
+		case 1:
+			singles++
+		case 2:
+			doubles++
+		default:
+			t.Fatalf("Codes(%d) produced %q, want at most width 2", base+1, code)
 		}
-		for _, code := range codes {
-			if len(code) != tc.width {
-				t.Fatalf("Codes(%d) produced %q, want width %d", tc.n, code, tc.width)
-			}
-		}
+	}
+	if singles != base-1 || doubles != 2 {
+		t.Fatalf("Codes(%d) = %d singles and %d doubles, want %d and 2", base+1, singles, doubles, base-1)
+	}
+	// The earliest characters stay short: the expansion starts at the end
+	// of the alphabet, so its last character is the first leaf sacrificed.
+	runes := []rune(DefaultAlphabet)
+	want := make([]string, 0, base+1)
+	for _, r := range runes[:len(runes)-1] {
+		want = append(want, string(r))
+	}
+	last := string(runes[len(runes)-1])
+	want = append(want, last+string(runes[0]), last+string(runes[1]))
+	if !reflect.DeepEqual(codes, want) {
+		t.Fatalf("Codes(%d) = %+v, want %+v", base+1, codes, want)
 	}
 }
 
@@ -55,6 +69,20 @@ func TestCodesAreDistinctAndTypeable(t *testing.T) {
 		for _, ch := range code {
 			if !strings.ContainsRune(DefaultAlphabet, ch) {
 				t.Fatalf("code %q uses %q, which is outside the alphabet", code, ch)
+			}
+		}
+	}
+}
+
+// No code may prefix another: that is what lets a fully typed code select
+// without Enter.
+func TestCodesArePrefixFree(t *testing.T) {
+	t.Parallel()
+	codes := Codes(500, DefaultAlphabet)
+	for i, a := range codes {
+		for j, b := range codes {
+			if i != j && strings.HasPrefix(b, a) {
+				t.Fatalf("code %q is a prefix of %q", a, b)
 			}
 		}
 	}
