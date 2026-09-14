@@ -123,6 +123,29 @@ func TestRenderFadesARuledOutBadge(t *testing.T) {
 	}
 }
 
+// The typed prefix is inverted against the rest of the badge, so the screen
+// shows what the readout echoed.
+func TestRenderInvertsTheTypedPrefix(t *testing.T) {
+	t.Parallel()
+	viewport := Size{Cols: 80, Rows: 24}
+	// Before is 4 and the code is two characters, so the badge sits beside
+	// the link at columns 8-9. y=66 is inside the badge box, below its
+	// outline and above the centred glyph.
+	_, img := render(t, []Badge{{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as", Typed: 1}}, viewport)
+	r1, g1, b1, _ := img.At(8*cell.Width+cell.Width/2, 4*cell.Height+2).RGBA()
+	r2, g2, b2, _ := img.At(9*cell.Width+cell.Width/2, 4*cell.Height+2).RGBA()
+	if r1 == r2 && g1 == g2 && b1 == b2 {
+		t.Fatal("the typed cell blends into the rest of the badge")
+	}
+
+	_, plain := render(t, []Badge{{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as"}}, viewport)
+	p1, q1, _, _ := plain.At(8*cell.Width+cell.Width/2, 4*cell.Height+2).RGBA()
+	p2, q2, _, _ := plain.At(9*cell.Width+cell.Width/2, 4*cell.Height+2).RGBA()
+	if p1 != p2 || q1 != q2 {
+		t.Fatal("a badge with no typed prefix should read as one box")
+	}
+}
+
 func TestRenderClipsToTheViewport(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 80, Rows: 24}

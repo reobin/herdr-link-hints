@@ -221,8 +221,8 @@ func pick() int {
 		term.Pause("no layer")
 		return exitFailed
 	}
-	opts.OnNarrow = func(matches []int, _ string) {
-		marks.draw(ctx, badgesFor(found, codes, matches))
+	opts.OnNarrow = func(matches []int, typed string) {
+		marks.draw(ctx, badgesFor(found, codes, matches, typed))
 	}
 
 	index, picked := ui.Pick(term, itemsFor(found, codes), opts)
@@ -345,8 +345,9 @@ func itemsFor(found []links.Link, codes []string) []ui.Item {
 }
 
 // badgesFor dims the links a prefix has ruled out rather than removing
-// them, so narrowing does not rearrange the screen.
-func badgesFor(found []links.Link, codes []string, matches []int) map[string][]overlay.Badge {
+// them, so narrowing does not rearrange the screen. The typed prefix is
+// marked on each badge, so the screen shows what the readout has echoed.
+func badgesFor(found []links.Link, codes []string, matches []int, typed string) map[string][]overlay.Badge {
 	matched := make(map[int]bool, len(matches))
 	for _, i := range matches {
 		matched[i] = true
@@ -360,9 +361,21 @@ func badgesFor(found []links.Link, codes []string, matches []int) map[string][]o
 			Width:  cells.Width(link.Text),
 			Code:   codes[i],
 			Dim:    !matched[i],
+			Typed:  commonPrefix(codes[i], typed),
 		})
 	}
 	return badges
+}
+
+// commonPrefix counts the leading runes code and typed share, so a ruled-out
+// badge never claims more than it matches.
+func commonPrefix(code, typed string) int {
+	cr, tr := []rune(code), []rune(typed)
+	n := 0
+	for n < len(cr) && n < len(tr) && cr[n] == tr[n] {
+		n++
+	}
+	return n
 }
 
 func paneScrolls(ctx context.Context, client *herdr.Client, panes []string, log *slog.Logger) map[string]herdr.Scroll {
