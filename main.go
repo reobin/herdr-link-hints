@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -38,12 +37,8 @@ const (
 	pluginID   = "herdr-link-hints"
 	entrypoint = "picker"
 
-	// envMode carries the --open decision into the pane: --open can reach the
-	// socket but has no terminal.
-	envMode      = "HINTS_MODE"
+	// envPlacement overrides the popup placement for testing.
 	envPlacement = "HINTS_PLACEMENT"
-	modeAnnotate = "annotate"
-	modeList     = "list"
 
 	// overlayZ puts the hints above anything else a pane may have drawn.
 	overlayZ = 1000
@@ -74,27 +69,30 @@ func open() int {
 	}
 
 	client := herdr.New()
-	mode, cell := pickMode(ctx, client, focused, log)
-	open := paneFor(mode, cell)
+	cell, ok := graphicsCell(ctx, client, focused, log)
+	if !ok {
+		return exitFailed
+	}
+	open := paneFor(cell)
 	pane, err := client.OpenPane(ctx, open)
 	if err != nil {
 		log.Debug("open picker pane failed", "placement", open.Placement, "error", err)
 		return exitFailed
 	}
-	log.Debug("picker pane opened", "pane", pane, "mode", mode,
+	log.Debug("picker pane opened", "pane", pane,
 		"placement", open.Placement, "width", open.Width, "height", open.Height)
 	return exitOK
 }
 
 // paneFor picks the placement. Only a popup can be sized, and only a popup
 // floats rather than reflowing the pane the hints are drawn on.
-func paneFor(mode string, cell herdr.Graphics) herdr.PaneOpen {
+func paneFor(cell herdr.Graphics) herdr.PaneOpen {
 	open := herdr.PaneOpen{
 		Plugin:     pluginID,
 		Entrypoint: entrypoint,
 		Placement:  envOr(envPlacement, "popup"),
 		Focus:      true,
-		Env:        map[string]string{envMode: mode},
+		Env:        map[string]string{},
 	}
 	// The pane is a separate process, so debugging it needs the setting
 	// carried across.
@@ -102,18 +100,18 @@ func paneFor(mode string, cell herdr.Graphics) herdr.PaneOpen {
 		open.Env["HINTS_DEBUG"] = debug
 	}
 	if open.Placement == "popup" {
-		open.Width, open.Height = paneShape(mode, cell)
+		open.Width, open.Height = paneShape(cell)
 	}
 	return open
 }
 
-// pickMode falls back to the list when there are no graphics to draw on.
-// The cell size comes back with it, because that is what squares the popup.
-func pickMode(ctx context.Context, client *herdr.Client, pane string, log *slog.Logger) (string, herdr.Graphics) {
+// graphicsCell is the cell size that squares the popup. Without graphics
+// there is nothing to draw on, so opening fails.
+func graphicsCell(ctx context.Context, client *herdr.Client, pane string, log *slog.Logger) (herdr.Graphics, bool) {
 	info, err := client.GraphicsInfo(ctx, pane)
 	if err != nil {
 		log.Debug("graphics unavailable", "pane", pane, "error", err)
-		return modeList, info
+		return info, false
 	}
 	log.Debug("graphics",
 		"pane", pane,
@@ -122,9 +120,9 @@ func pickMode(ctx context.Context, client *herdr.Client, pane string, log *slog.
 		"pane_visible", info.PaneVisible,
 		"max_layers_per_pane", info.MaxLayers)
 	if !info.PaneVisible || info.CellWidthPx <= 0 || info.CellHeightPx <= 0 {
-		return modeList, info
+		return info, false
 	}
-	return modeAnnotate, info
+	return info, true
 }
 
 // annotateRows is the outer height of the annotate popup. Herdr takes a
@@ -134,11 +132,8 @@ const annotateRows = 5
 
 // paneShape keeps the annotate popup square on screen. Cells are far taller
 // than they are wide, so squareness is a pixel measure, not a cell count.
-func paneShape(mode string, cell herdr.Graphics) (width, height string) {
-	width, height = "80%", "60%"
-	if mode == modeAnnotate {
-		width, height = strconv.Itoa(squareCols(cell)), strconv.Itoa(annotateRows)
-	}
+func paneShape(cell herdr.Graphics) (width, height string) {
+	width, height = strconv.Itoa(squareCols(cell)), strconv.Itoa(annotateRows)
 	return envOr("HINTS_WIDTH", width), envOr("HINTS_HEIGHT", height)
 }
 
@@ -177,36 +172,21 @@ func pick() int {
 	// under-counts growth and Locate returns an unverified row.
 	scrolls := paneScrolls(ctx, client, ids, log)
 
-	var (
-		labels map[string]string
-		found  []links.Link
-		wg     sync.WaitGroup
-	)
 	scanner := &scan.Scanner{Source: client, Log: log, SkipObserve: os.Getenv("HINTS_NO_OBSERVE") != ""}
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		var err error
-		labels, err = client.PaneLabels(ctx, ids)
-		if err != nil {
-			log.Debug("pane list failed", "error", err)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		found = scanner.Links(ctx, scanPanes(panes, scrolls))
-	}()
-	wg.Wait()
+	scanInput := scanPanes(panes, scrolls)
+	// The cursor sits where the prompt does: the viewport's bottom row.
+	// That is also where the newest output is, so nearness to it and
+	// recency pull the same way.
+	cursors := make(map[string]int, len(scanInput))
+	for _, pane := range scanInput {
+		cursors[pane.ID] = pane.Rows - 1
+	}
+	found := hints.Rank(scanner.Links(ctx, scanInput), focused, cursors)
 	scanning()
 
-	title := screenTitle(ids, labels, focused)
-
-	var marks *marker
-	if os.Getenv(envMode) == modeAnnotate {
-		marks = newMarker(ctx, client, log, term.Theme(), panes, scrolls)
-		// A layer Herdr has accepted outlives the process that set it.
-		defer marks.clear(context.WithoutCancel(ctx))
-	}
+	marks := newMarker(ctx, client, log, term.Theme(), panes, scrolls)
+	// A layer Herdr has accepted outlives the process that set it.
+	defer marks.clear(context.WithoutCancel(ctx))
 	if len(found) == 0 {
 		// The backdrop still goes up, so an empty screen reads as an answer.
 		if marks.live() {
@@ -217,19 +197,16 @@ func pick() int {
 	}
 
 	codes := hints.Codes(len(found), hints.DefaultAlphabet)
-	opts := ui.Options{Title: title, Alphabet: hints.DefaultAlphabet}
-	if marks != nil {
-		if !marks.live() {
-			term.Pause("no layer")
-			return exitFailed
-		}
-		opts.Style = ui.StyleStatus
-		opts.OnNarrow = func(matches []int, _ string) {
-			marks.draw(ctx, badgesFor(found, codes, matches))
-		}
+	opts := ui.Options{Alphabet: hints.DefaultAlphabet}
+	if !marks.live() {
+		term.Pause("no layer")
+		return exitFailed
+	}
+	opts.OnNarrow = func(matches []int, _ string) {
+		marks.draw(ctx, badgesFor(found, codes, matches))
 	}
 
-	index, picked := ui.Pick(term, itemsFor(found, codes, labels, len(ids) > 1), opts)
+	index, picked := ui.Pick(term, itemsFor(found, codes), opts)
 	if !picked {
 		return exitCancelled
 	}
@@ -318,26 +295,10 @@ func scanPanes(panes []herdr.Pane, scrolls map[string]herdr.Scroll) []scan.Pane 
 	return out
 }
 
-func screenTitle(panes []string, labels map[string]string, focused string) string {
-	if len(panes) > 1 {
-		return fmt.Sprintf("%d panes", len(panes))
-	}
-	if label := labels[focused]; label != "" {
-		return "pane " + label
-	}
-	return "pane " + focused
-}
-
-func itemsFor(found []links.Link, codes []string, labels map[string]string, showPane bool) []ui.Item {
+func itemsFor(found []links.Link, codes []string) []ui.Item {
 	items := make([]ui.Item, len(found))
-	for i, link := range found {
-		where := ""
-		if showPane {
-			if where = labels[link.Pane]; where == "" {
-				where = link.Pane
-			}
-		}
-		items[i] = ui.Item{Code: codes[i], Text: link.Text, Where: where, Row: link.Row}
+	for i := range found {
+		items[i] = ui.Item{Code: codes[i]}
 	}
 	return items
 }
