@@ -214,6 +214,18 @@ func TestLocate(t *testing.T) {
 			choice:  links.Link{URL: "https://a.io/x", Text: "https://a.io/x", Kind: links.Text, Row: 0, Col: 4},
 			shift:   5,
 		},
+		{
+			name:    "gives up when a text link is gone without scrolling",
+			visible: []string{"nothing here"},
+			choice:  links.Link{URL: "https://a.io/x", Text: "https://a.io/x", Kind: links.Text, Row: 0, Col: 4},
+			shift:   0,
+		},
+		{
+			name:    "gives up when a scrolled link is nowhere to be found",
+			visible: []string{"nothing here"},
+			choice:  links.Link{URL: "https://g.io/pull/2", Text: "#2", Kind: links.OSC8, Row: 10, Col: 4},
+			shift:   3,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -196,8 +196,5 @@ func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row
 			}
 		}
 	}
-	if shifted >= 0 {
-		return shifted, choice.Col, true
-	}
 	return 0, 0, false
 }
