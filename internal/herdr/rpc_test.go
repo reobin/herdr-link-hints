@@ -26,8 +26,7 @@ func socketPath(t *testing.T) string {
 }
 
 // fakeServer answers every request on every connection with reply's
-// lines, like the real socket: connections stay open for reuse. reply
-// sees the decoded request so it can echo the id.
+// lines. reply sees the decoded request so it can echo the id.
 func fakeServer(t *testing.T, reply func(request map[string]any) [][]byte) string {
 	return serve(t, nil, reply)
 }
@@ -173,9 +172,9 @@ func TestActivateLinkWithoutServer(t *testing.T) {
 	}
 }
 
-// One client holds one connection: a three-pane screen dials once, not
-// once per pane per redraw.
-func TestClientReusesOneConnection(t *testing.T) {
+// The real server closes the connection after each response, so one
+// client dials once per call instead of holding a connection.
+func TestClientDialsPerCall(t *testing.T) {
 	t.Parallel()
 	var conns atomic.Int64
 	socket := serve(t, &conns, func(request map[string]any) [][]byte {
@@ -191,13 +190,13 @@ func TestClientReusesOneConnection(t *testing.T) {
 			t.Fatalf("ActivateLink: %v", err)
 		}
 	}
-	if got := conns.Load(); got != 1 {
-		t.Fatalf("dialed %d connections, want 1", got)
+	if got := conns.Load(); got != 3 {
+		t.Fatalf("dialed %d connections, want 3", got)
 	}
 }
 
-// A failed call drops the connection so the next call redials instead of
-// reading from a dead socket.
+// A failed call closes its connection, so the next call dials fresh
+// instead of reading from a dead socket.
 func TestFailedCallRedials(t *testing.T) {
 	t.Parallel()
 	var conns atomic.Int64

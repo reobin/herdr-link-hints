@@ -61,17 +61,14 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	ctx, cancel := context.WithTimeout(ctx, c.rpcTimeout)
 	defer cancel()
 
-	// One connection per client: requests serialize on the mutex, so a
-	// three-pane screen dials once instead of once per pane per redraw.
-	// A unix dial is cheap next to a process spawn; the win here is
-	// holding the connection, not dodging the handshake.
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	conn, err := c.dialLocked(ctx)
+	// The server closes the connection after each response, so every
+	// call dials fresh: reusing a connection fails the next write with
+	// a broken pipe.
+	conn, err := c.dial(ctx)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = conn.Close() }()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}
@@ -79,10 +76,10 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	id := nextRequestID()
 	body, err := json.Marshal(rpcRequest{ID: id, Method: method, Params: params})
 	if err != nil {
-		return c.failLocked(fmt.Errorf("encode %s request: %w", method, err))
+		return fmt.Errorf("encode %s request: %w", method, err)
 	}
 	if _, err := conn.Write(append(body, '\n')); err != nil {
-		return c.failLocked(fmt.Errorf("send %s request: %w", method, err))
+		return fmt.Errorf("send %s request: %w", method, err)
 	}
 
 	// The socket also carries events and other clients' replies.
@@ -90,7 +87,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	for {
 		var response rpcResponse
 		if err := decoder.Decode(&response); err != nil {
-			return c.failLocked(fmt.Errorf("read %s response: %w", method, err))
+			return fmt.Errorf("read %s response: %w", method, err)
 		}
 		if response.ID != id {
 			continue
@@ -102,34 +99,20 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 			return nil
 		}
 		if err := json.Unmarshal(response.Result, result); err != nil {
-			return c.failLocked(fmt.Errorf("parse %s result: %w", method, err))
+			return fmt.Errorf("parse %s result: %w", method, err)
 		}
 		return nil
 	}
 }
 
-// dialLocked returns the shared connection, dialling it on first use. A
-// failed call drops it so the next call redials and the CLI fallback in
-// the caller still has a live server to talk to.
-func (c *Client) dialLocked(ctx context.Context) (net.Conn, error) {
-	if c.conn != nil {
-		return c.conn, nil
-	}
+// dial opens one connection for a single call.
+func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.socket)
 	if err != nil {
 		return nil, fmt.Errorf("dial herdr socket %s: %w", c.socket, err)
 	}
-	c.conn = conn
 	return conn, nil
-}
-
-func (c *Client) failLocked(err error) error {
-	if c.conn != nil {
-		_ = c.conn.Close()
-		c.conn = nil
-	}
-	return err
 }
 
 // Graphics reports what pane.graphics can do for a pane. A feature_disabled
