@@ -173,7 +173,7 @@ func pick() int {
 	}()
 	go func() {
 		defer wg.Done()
-		found = scanner.Links(ctx, ids)
+		found = scanner.Links(ctx, scanPanes(panes, scrolls))
 	}()
 	wg.Wait()
 	scanning()
@@ -271,6 +271,15 @@ func paneIDs(panes []herdr.Pane) []string {
 		ids[i] = pane.ID
 	}
 	return ids
+}
+
+func scanPanes(panes []herdr.Pane, scrolls map[string]herdr.Scroll) []scan.Pane {
+	out := make([]scan.Pane, len(panes))
+	for i, pane := range panes {
+		size := content(pane, scrolls[pane.ID].ViewportRows)
+		out[i] = scan.Pane{ID: pane.ID, Cols: size.Cols, Rows: size.Rows}
+	}
+	return out
 }
 
 func screenTitle(panes []string, labels map[string]string, focused string) string {

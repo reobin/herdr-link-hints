@@ -185,8 +185,9 @@ type cell struct {
 const maxAnchorHits = 8
 
 // Merge places a hidden link by searching the visible text for its anchor:
-// the observe stream can be smaller and staler than the pane, so its own
-// coordinates are the last resort. Every occurrence is marked.
+// the observe stream is a repaint of its own, so it can be staler than the
+// snapshot and its coordinates are the last resort. Every occurrence is
+// marked.
 func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 	var out []Link
 	taken := map[cell]bool{}
