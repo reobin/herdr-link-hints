@@ -14,16 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
 
-// Sources accepted by `herdr pane read --source`.
-const (
-	SourceVisible   = "visible"
-	SourceUnwrapped = "recent-unwrapped"
-)
+// SourceVisible is the `herdr pane read --source` value scanning uses.
+const SourceVisible = "visible"
 
 // Client dials Herdr's control socket fresh for each call. It starts
 // nothing that outlives it; pane inspection that cannot go over the
@@ -63,29 +59,22 @@ func defaultSocket() string {
 	return filepath.Join(home, ".config", "herdr", "herdr.sock")
 }
 
-// PaneLines reads a pane's text. A lines count of zero leaves the extent
-// to Herdr. It goes over the socket and falls back to the CLI until socket
-// parity is proven.
-func (c *Client) PaneLines(ctx context.Context, pane, source string, lines int) ([]string, error) {
-	if text, err := c.paneLinesSocket(ctx, pane, source, lines); err == nil {
+// PaneLines reads a pane's visible text, leaving the extent to Herdr. It
+// goes over the socket and falls back to the CLI until socket parity is
+// proven.
+func (c *Client) PaneLines(ctx context.Context, pane string) ([]string, error) {
+	if text, err := c.paneLinesSocket(ctx, pane); err == nil {
 		return text, nil
 	}
-	args := []string{"pane", "read", pane, "--source", source}
-	if lines > 0 {
-		args = append(args, "--lines", strconv.Itoa(lines))
-	}
-	out, err := c.run(ctx, args...)
+	out, err := c.run(ctx, "pane", "read", pane, "--source", SourceVisible)
 	if err != nil {
 		return nil, err
 	}
 	return strings.Split(string(out), "\n"), nil
 }
 
-func (c *Client) paneLinesSocket(ctx context.Context, pane, source string, lines int) ([]string, error) {
-	params := map[string]any{"pane_id": pane, "source": socketSource(source), "format": "text"}
-	if lines > 0 {
-		params["lines"] = lines
-	}
+func (c *Client) paneLinesSocket(ctx context.Context, pane string) ([]string, error) {
+	params := map[string]any{"pane_id": pane, "source": SourceVisible, "format": "text"}
 	var result struct {
 		Read struct {
 			Text string `json:"text"`
@@ -95,15 +84,6 @@ func (c *Client) paneLinesSocket(ctx context.Context, pane, source string, lines
 		return nil, err
 	}
 	return strings.Split(result.Read.Text, "\n"), nil
-}
-
-// socketSource maps CLI source names onto the socket enum, which spells
-// recent-unwrapped with an underscore.
-func socketSource(source string) string {
-	if source == SourceUnwrapped {
-		return "recent_unwrapped"
-	}
-	return source
 }
 
 // Pane is a pane on screen. Width and Height are its outer rect in cells,

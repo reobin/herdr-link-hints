@@ -9,34 +9,33 @@ import (
 	"testing"
 
 	"github.com/reobin/herdr-link-hints/internal/ansi"
-	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
 )
 
 // fakeSource answers pane reads from a table. A Scanner reads panes
 // concurrently, so the counters are guarded.
 type fakeSource struct {
-	text    map[[2]string][]string
+	text    map[string][]string
 	hidden  map[string][]ansi.Link
 	readErr error
 
 	mu       sync.Mutex
 	observed map[string]int
 	sizes    map[string][2]int
-	reads    map[[2]string]int
+	reads    map[string]int
 }
 
-func (f *fakeSource) PaneLines(_ context.Context, pane, source string, _ int) ([]string, error) {
+func (f *fakeSource) PaneLines(_ context.Context, pane string) ([]string, error) {
 	if f.readErr != nil {
 		return nil, f.readErr
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.reads == nil {
-		f.reads = map[[2]string]int{}
+		f.reads = map[string]int{}
 	}
-	f.reads[[2]string{pane, source}]++
-	return f.text[[2]string{pane, source}], nil
+	f.reads[pane]++
+	return f.text[pane], nil
 }
 
 func (f *fakeSource) ObserveOSC8(_ context.Context, pane string, cols, rows int) ([]ansi.Link, error) {
@@ -65,10 +64,10 @@ func (f *fakeSource) observeCount(pane string) int {
 	return f.observed[pane]
 }
 
-func (f *fakeSource) readCount(pane, source string) int {
+func (f *fakeSource) readCount(pane string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.reads[[2]string{pane, source}]
+	return f.reads[pane]
 }
 
 // panes sizes every pane the same: only the observe call cares, and the
@@ -85,17 +84,16 @@ func newScanner(source Source) *Scanner {
 	return &Scanner{Source: source, Log: slog.New(slog.DiscardHandler)}
 }
 
-func paneText(pane string, lines ...string) map[[2]string][]string {
-	return map[[2]string][]string{
-		{pane, herdr.SourceVisible}:   lines,
-		{pane, herdr.SourceUnwrapped}: lines,
+func paneText(pane string, lines ...string) map[string][]string {
+	return map[string][]string{
+		pane: lines,
 	}
 }
 
 // One destination on two panes gets a hint on each.
 func TestLinksHintsEveryCopyAcrossPanes(t *testing.T) {
 	t.Parallel()
-	source := &fakeSource{text: map[[2]string][]string{}}
+	source := &fakeSource{text: map[string][]string{}}
 	for key, value := range paneText("w1:p1", "go https://a.io/x") {
 		source.text[key] = value
 	}
@@ -230,7 +228,7 @@ func TestLocate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: tc.visible}}
+			source := &fakeSource{text: map[string][]string{"w1:p1": tc.visible}}
 			tc.choice.Pane = "w1:p1"
 			row, col, ok := newScanner(source).Locate(context.Background(), tc.choice, tc.shift)
 			if ok != tc.wantOK || (ok && (row != tc.wantRow || col != tc.wantCol)) {
@@ -245,15 +243,12 @@ func TestLocate(t *testing.T) {
 func TestLinksCompletesWrappedURL(t *testing.T) {
 	t.Parallel()
 	visible := []string{"go https://a.io/long-ur", "l-continued here"}
-	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
+	source := &fakeSource{text: map[string][]string{"w1:p1": visible}}
 	scanner := newScanner(source)
 	scanner.SkipObserve = true
 	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
 	if len(got) != 1 || got[0].URL != "https://a.io/long-url-continued" {
 		t.Fatalf("Links() = %+v", got)
-	}
-	if n := source.readCount("w1:p1", herdr.SourceUnwrapped); n != 0 {
-		t.Fatalf("unwrapped reads = %d, want none: the read scrolls the pane", n)
 	}
 }
 
@@ -262,7 +257,7 @@ func TestLinksCompletesWrappedURL(t *testing.T) {
 func TestLinksLeavesAShortLineAlone(t *testing.T) {
 	t.Parallel()
 	visible := []string{"go https://a.io/long-ur", "l-continued here"}
-	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
+	source := &fakeSource{text: map[string][]string{"w1:p1": visible}}
 	scanner := newScanner(source)
 	scanner.SkipObserve = true
 	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: 100, Rows: 24}})
@@ -276,7 +271,7 @@ func TestLinksLeavesAShortLineAlone(t *testing.T) {
 func TestLinksLeavesAWrappedDotAlone(t *testing.T) {
 	t.Parallel()
 	visible := []string{"see https://docs.a.io/guide/v2.", "1/install here"}
-	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
+	source := &fakeSource{text: map[string][]string{"w1:p1": visible}}
 	scanner := newScanner(source)
 	scanner.SkipObserve = true
 	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
@@ -295,7 +290,7 @@ func TestLinksGuardsOnlyTheDotGuess(t *testing.T) {
 		"see now! https://docs.a.io/v2.",
 		"1/install here",
 	}
-	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
+	source := &fakeSource{text: map[string][]string{"w1:p1": visible}}
 	scanner := newScanner(source)
 	scanner.SkipObserve = true
 	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
@@ -318,7 +313,7 @@ func TestLinksShortDotKeepsStructuralCompletion(t *testing.T) {
 		"go https://a.io/v2.1-long-ur",
 		"l-continued here",
 	}
-	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
+	source := &fakeSource{text: map[string][]string{"w1:p1": visible}}
 	scanner := newScanner(source)
 	scanner.SkipObserve = true
 	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[1]), Rows: 24}})
@@ -340,9 +335,6 @@ func TestLinksNeverReadsScrollback(t *testing.T) {
 	got := scanner.Links(context.Background(), panes("w1:p1"))
 	if len(got) != 1 || got[0].URL != "https://a.io/x" {
 		t.Fatalf("Links() = %+v", got)
-	}
-	if n := source.readCount("w1:p1", herdr.SourceUnwrapped); n != 0 {
-		t.Fatalf("unwrapped reads = %d, want none without a wrapped URL", n)
 	}
 }
 
