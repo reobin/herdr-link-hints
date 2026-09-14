@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -24,9 +25,14 @@ func socketPath(t *testing.T) string {
 	return filepath.Join(dir, "s.sock")
 }
 
-// fakeServer answers one connection with reply's lines, then closes. reply
+// fakeServer answers every request on every connection with reply's
+// lines, like the real socket: connections stay open for reuse. reply
 // sees the decoded request so it can echo the id.
 func fakeServer(t *testing.T, reply func(request map[string]any) [][]byte) string {
+	return serve(t, nil, reply)
+}
+
+func serve(t *testing.T, conns *atomic.Int64, reply func(request map[string]any) [][]byte) string {
 	t.Helper()
 	socket := socketPath(t)
 	listener, err := net.Listen("unix", socket)
@@ -36,19 +42,29 @@ func fakeServer(t *testing.T, reply func(request map[string]any) [][]byte) strin
 	t.Cleanup(func() { _ = listener.Close() })
 
 	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			return
-		}
-		defer func() { _ = conn.Close() }()
-		var request map[string]any
-		if err := json.NewDecoder(conn).Decode(&request); err != nil {
-			return
-		}
-		for _, line := range reply(request) {
-			if _, err := conn.Write(append(line, '\n')); err != nil {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
 				return
 			}
+			if conns != nil {
+				conns.Add(1)
+			}
+			go func() {
+				defer func() { _ = conn.Close() }()
+				decoder := json.NewDecoder(conn)
+				for {
+					var request map[string]any
+					if err := decoder.Decode(&request); err != nil {
+						return
+					}
+					for _, line := range reply(request) {
+						if _, err := conn.Write(append(line, '\n')); err != nil {
+							return
+						}
+					}
+				}
+			}()
 		}
 	}()
 	return socket
@@ -154,5 +170,92 @@ func TestActivateLinkWithoutServer(t *testing.T) {
 	t.Parallel()
 	if _, err := New(WithSocket(socketPath(t))).ActivateLink(context.Background(), "w1:p1", 0, 0); err == nil {
 		t.Fatal("expected a dial error")
+	}
+}
+
+// One client holds one connection: a three-pane screen dials once, not
+// once per pane per redraw.
+func TestClientReusesOneConnection(t *testing.T) {
+	t.Parallel()
+	var conns atomic.Int64
+	socket := serve(t, &conns, func(request map[string]any) [][]byte {
+		return [][]byte{mustJSON(t, map[string]any{
+			"id":     request["id"],
+			"result": map[string]any{"url": "https://a.io/x", "handled": true},
+		})}
+	})
+
+	client := New(WithSocket(socket))
+	for range 3 {
+		if _, err := client.ActivateLink(context.Background(), "w1:p1", 0, 0); err != nil {
+			t.Fatalf("ActivateLink: %v", err)
+		}
+	}
+	if got := conns.Load(); got != 1 {
+		t.Fatalf("dialed %d connections, want 1", got)
+	}
+}
+
+// A failed call drops the connection so the next call redials instead of
+// reading from a dead socket.
+func TestFailedCallRedials(t *testing.T) {
+	t.Parallel()
+	var conns atomic.Int64
+	socket := serve(t, &conns, func(request map[string]any) [][]byte { return nil })
+
+	client := New(WithSocket(socket), WithTimeouts(time.Second, 100*time.Millisecond))
+	if _, err := client.ActivateLink(context.Background(), "w1:p1", 0, 0); err == nil {
+		t.Fatal("expected a timeout")
+	}
+	if _, err := client.ActivateLink(context.Background(), "w1:p1", 0, 0); err == nil {
+		t.Fatal("expected a timeout")
+	}
+	if got := conns.Load(); got != 2 {
+		t.Fatalf("dialed %d connections, want 2", got)
+	}
+}
+
+func TestGraphicsInfos(t *testing.T) {
+	t.Parallel()
+	requests := make(chan map[string]any, 2)
+	socket := fakeServer(t, func(request map[string]any) [][]byte {
+		requests <- request
+		return [][]byte{mustJSON(t, map[string]any{
+			"id":     request["id"],
+			"result": map[string]any{"cell_width_px": 9, "cell_height_px": 20, "pane_visible": true},
+		})}
+	})
+
+	infos := New(WithSocket(socket)).GraphicsInfos(context.Background(), []string{"w1:p1", "w1:p2"})
+	if len(infos) != 2 {
+		t.Fatalf("GraphicsInfos() = %+v, want both panes", infos)
+	}
+	for i := range 2 {
+		request := <-requests
+		if request["method"] != "pane.graphics.info" {
+			t.Fatalf("request %d method = %v", i, request["method"])
+		}
+	}
+}
+
+func TestGraphicsInfosSkipsFailures(t *testing.T) {
+	t.Parallel()
+	socket := fakeServer(t, func(request map[string]any) [][]byte {
+		params, _ := request["params"].(map[string]any)
+		if params["pane_id"] == "w1:p2" {
+			return [][]byte{mustJSON(t, map[string]any{
+				"id":    request["id"],
+				"error": map[string]any{"code": "not_found", "message": "gone"},
+			})}
+		}
+		return [][]byte{mustJSON(t, map[string]any{
+			"id":     request["id"],
+			"result": map[string]any{"cell_width_px": 9, "cell_height_px": 20, "pane_visible": true},
+		})}
+	})
+
+	infos := New(WithSocket(socket)).GraphicsInfos(context.Background(), []string{"w1:p1", "w1:p2"})
+	if len(infos) != 1 || infos["w1:p1"].CellWidthPx != 9 {
+		t.Fatalf("GraphicsInfos() = %+v, want only w1:p1", infos)
 	}
 }
