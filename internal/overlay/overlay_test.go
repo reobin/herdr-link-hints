@@ -250,16 +250,7 @@ func TestCheckSizeRejectsAnOversizeFrame(t *testing.T) {
 // The worst case a real pane can produce still has to fit under the cap.
 func TestRenderKeepsAFullScreenUnderTheCap(t *testing.T) {
 	t.Parallel()
-	viewport := Size{Cols: 204, Rows: 57}
-	var badges []Badge
-	for row := range viewport.Rows {
-		for col := 0; col < viewport.Cols; col += 6 {
-			badges = append(badges, Badge{Row: row, Col: col, Width: 4, Code: "as"})
-		}
-	}
-	full := scene(badges, viewport)
-	full.Cell = Cell{Width: 19, Height: 54}
-	frame, err := Render(full)
+	frame, err := Render(fullScreenScene())
 	if err != nil {
 		t.Fatalf("Render() error: %v", err)
 	}
