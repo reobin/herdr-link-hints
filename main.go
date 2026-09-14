@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/reobin/herdr-link-hints/internal/browse"
 	"github.com/reobin/herdr-link-hints/internal/cells"
@@ -298,7 +299,29 @@ func newLogger() *slog.Logger {
 			out = file
 		}
 	}
-	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	handler := slog.NewTextHandler(out, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(&durationHandler{Handler: handler, start: time.Now()})
+}
+
+// durationHandler stamps every record with how long the process has been
+// running, so the HINTS_DEBUG lines measure startup instead of estimating
+// it.
+type durationHandler struct {
+	slog.Handler
+	start time.Time
+}
+
+func (h *durationHandler) Handle(ctx context.Context, r slog.Record) error {
+	r.AddAttrs(slog.Int64("duration_ms", time.Since(h.start).Milliseconds()))
+	return h.Handler.Handle(ctx, r)
+}
+
+func (h *durationHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &durationHandler{Handler: h.Handler.WithAttrs(attrs), start: h.start}
+}
+
+func (h *durationHandler) WithGroup(name string) slog.Handler {
+	return &durationHandler{Handler: h.Handler.WithGroup(name), start: h.start}
 }
 
 func paneIDs(panes []herdr.Pane) []string {

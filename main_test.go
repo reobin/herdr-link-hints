@@ -1,14 +1,34 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
 	"github.com/reobin/herdr-link-hints/internal/overlay"
 )
+
+// Every debug line carries how long the process has been running, so the
+// startup cost is measured rather than estimated.
+func TestLoggerStampsDuration(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	log := slog.New(&durationHandler{
+		Handler: slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}),
+		start:   time.Now().Add(-time.Second),
+	})
+	log.Debug("picker pane", "rows", 5)
+	out := buf.String()
+	if !strings.Contains(out, "duration_ms=") {
+		t.Fatalf("log line has no duration: %q", out)
+	}
+}
 
 func TestTarget(t *testing.T) {
 	t.Parallel()

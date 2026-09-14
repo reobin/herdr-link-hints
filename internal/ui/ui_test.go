@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"image/color"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -304,10 +305,20 @@ func TestPickReportsNarrowingWithoutATerminal(t *testing.T) {
 	}
 }
 
+// Not parallel: Theme reads TERM_PROGRAM and the cache under HOME, so
+// these tests each get a fresh home and their own program name.
+func themeEnv(t *testing.T, program string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("TERM_PROGRAM", program)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+}
+
 // A picker that cannot ask for the terminal's palette has to say so rather
 // than guess.
 func TestThemeReadsTheTerminalsColours(t *testing.T) {
-	t.Parallel()
+	themeEnv(t, "test-live-read")
 	replies := "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" +
 		"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\" +
 		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\"
@@ -332,7 +343,7 @@ func TestThemeReadsTheTerminalsColours(t *testing.T) {
 }
 
 func TestThemeFallsBackWhenTheTerminalStaysQuiet(t *testing.T) {
-	t.Parallel()
+	themeEnv(t, "test-quiet")
 	term, _ := keyTerminal(t, nil)
 	if got := term.Theme(); got != theme.Fallback() {
 		t.Fatalf("Theme() = %+v, want the fallback", got)
@@ -345,7 +356,7 @@ func TestThemeFallsBackWhenTheTerminalStaysQuiet(t *testing.T) {
 
 // A terminal that answers only some queries keeps the rest at fallback.
 func TestThemeKeepsWhatDidArrive(t *testing.T) {
-	t.Parallel()
+	themeEnv(t, "test-partial")
 	term, _ := keyTerminal(t, []byte("\x1b]11;rgb:1e/1e/2e\a"))
 	got := term.Theme()
 	if got.Background != (color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF}) {
@@ -353,6 +364,9 @@ func TestThemeKeepsWhatDidArrive(t *testing.T) {
 	}
 	if got.Accent != theme.Fallback().Accent {
 		t.Fatalf("Accent = %+v, want the fallback", got.Accent)
+	}
+	if _, ok := theme.Load("test-partial"); ok {
+		t.Fatal("Theme() saved a partial reply")
 	}
 }
 
@@ -419,6 +433,44 @@ func TestSpinnerTextDropsALabelThatCannotFit(t *testing.T) {
 	term.cols = 3
 	if got := term.spinnerText(0, "scanning"); got != spinnerFrames[0] {
 		t.Fatalf("spinnerText() = %q, want the spinner alone", got)
+	}
+}
+
+// A terminal that answered before is not asked again: the cached reply
+// comes back with nothing written to it.
+func TestThemeUsesTheCache(t *testing.T) {
+	themeEnv(t, "test-cached")
+	want := theme.Colors{
+		Foreground: color.RGBA{R: 0xCD, G: 0xD6, B: 0xF4, A: 0xFF},
+		Background: color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF},
+		Accent:     color.RGBA{R: 0xF9, G: 0xE2, B: 0xAF, A: 0xFF},
+	}
+	if err := theme.Save("test-cached", want); err != nil {
+		t.Fatal(err)
+	}
+	term, out := keyTerminal(t, nil)
+	if got := term.Theme(); got != want {
+		t.Fatalf("Theme() = %+v, want the cached colours", got)
+	}
+	term.Flush()
+	if out.Len() != 0 {
+		t.Fatalf("Theme() asked the terminal: %q", out.String())
+	}
+}
+
+// A full live reply is remembered for the next run; a partial one is not.
+func TestThemeSavesAFullReply(t *testing.T) {
+	themeEnv(t, "test-live")
+	replies := "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" +
+		"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\" +
+		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\"
+	term, _ := keyTerminal(t, []byte(replies))
+	got := term.Theme()
+	if _, ok := theme.Load("test-live"); !ok {
+		t.Fatal("Theme() did not save the full reply")
+	}
+	if got.Background != (color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF}) {
+		t.Fatalf("Theme() = %+v", got)
 	}
 }
 

@@ -65,16 +65,25 @@ func (t *Terminal) interactive() bool { return t.keys != nil }
 func (t *Terminal) Size() (rows, cols int) { return t.rows, t.cols }
 
 // Theme asks the terminal what colours it is painted in, falling back to
-// black and white when it does not answer.
+// black and white when it does not answer. A full reply is remembered on
+// disk keyed by TERM_PROGRAM for a day, so the next run under the same
+// terminal skips the round trip and its wait. Delete
+// ~/Library/Caches/herdr-link-hints/theme-*.json or set
+// HINTS_NO_THEME_CACHE=1 to force a live probe after a light/dark switch.
 func (t *Terminal) Theme() theme.Colors {
 	colors := theme.Fallback()
 	if !t.interactive() {
 		return colors
 	}
+	program := os.Getenv("TERM_PROGRAM")
+	if cached, ok := theme.Load(program); ok {
+		return cached
+	}
 	for _, key := range theme.Keys {
 		_, _ = fmt.Fprint(t.out, theme.Query(key))
 	}
 	t.Flush()
+	seen := make(map[string]bool, len(theme.Keys))
 	deadline := time.Now().Add(themeWait)
 	for range theme.Keys {
 		reply, ok := t.readReply(deadline)
@@ -82,8 +91,15 @@ func (t *Terminal) Theme() theme.Colors {
 			break
 		}
 		if key, rgb, ok := theme.Parse(reply); ok {
-			colors.Set(key, rgb)
+			switch key {
+			case theme.KeyForeground, theme.KeyBackground, theme.KeyAccent:
+				colors.Set(key, rgb)
+				seen[key] = true
+			}
 		}
+	}
+	if len(seen) == len(theme.Keys) {
+		_ = theme.Save(program, colors)
 	}
 	return colors
 }
