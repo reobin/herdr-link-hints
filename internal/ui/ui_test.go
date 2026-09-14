@@ -95,14 +95,14 @@ func TestReadKeySlowEscapeIsNotASequence(t *testing.T) {
 func items(codes ...string) []Item {
 	out := make([]Item, len(codes))
 	for i, code := range codes {
-		out[i] = Item{Code: code, Text: "https://x.io/" + code, Row: i}
+		out[i] = Item{Code: code}
 	}
 	return out
 }
 
 func TestPick(t *testing.T) {
 	t.Parallel()
-	opts := Options{Title: "pane neon", Alphabet: "asdfghjkl"}
+	opts := Options{Alphabet: "asdfghjkl"}
 	tests := []struct {
 		name  string
 		input string
@@ -137,6 +137,17 @@ func TestPickEnterConfirmsASingleMatch(t *testing.T) {
 	}
 }
 
+// A fully typed short code selects at once: prefix-free codes have no
+// longer sibling waiting on another keystroke.
+func TestPickSelectsAShortCodeWithoutEnter(t *testing.T) {
+	t.Parallel()
+	term, _ := keyTerminal(t, []byte("a"))
+	got, ok := Pick(term, items("a", "sa", "ss"), Options{Alphabet: "asdfghjkl"})
+	if !ok || got != 0 {
+		t.Fatalf("Pick() = %d, %v, want the short code without Enter", got, ok)
+	}
+}
+
 func TestPickByLine(t *testing.T) {
 	t.Parallel()
 	term, _ := lineTerminal("ad\n")
@@ -151,43 +162,12 @@ func TestPickByLine(t *testing.T) {
 	}
 }
 
-func TestRenderTruncatesToTheScreen(t *testing.T) {
-	t.Parallel()
-	long := make([]string, 40)
-	for i := range long {
-		long[i] = string(rune('a'+i%9)) + string(rune('a'+i/9))
-	}
-	term, out := keyTerminal(t, nil)
-	list := items(long...)
-	term.render(list, indices(list), "", Options{Title: "pane neon", Alphabet: "asdfghjkl"})
-	term.Flush()
-
-	text := out.String()
-	if !strings.Contains(text, "more, keep typing to narrow") {
-		t.Fatalf("expected an overflow note, got:\n%s", text)
-	}
-	if lines := strings.Count(text, "\r\n"); lines > fallbackRows {
-		t.Fatalf("rendered %d lines into a %d-row screen", lines, fallbackRows)
-	}
-}
-
-func TestRenderShowsPaneNames(t *testing.T) {
-	t.Parallel()
-	term, out := keyTerminal(t, nil)
-	list := []Item{{Code: "a", Text: "https://x.io", Where: "neon", Row: 4}}
-	term.render(list, indices(list), "", Options{Title: "2 panes", Alphabet: "asdfghjkl"})
-	term.Flush()
-	if !strings.Contains(out.String(), "[neon r5]") {
-		t.Fatalf("expected the pane name and 1-based row, got:\n%s", out.String())
-	}
-}
-
 // The whole readout is this one box: the keys typed, then what still
 // matches. Nothing else on screen repeats it.
 func TestRenderStatusShowsTypedAndCount(t *testing.T) {
 	t.Parallel()
 	list := items("aa", "as", "ad")
-	opts := Options{Alphabet: "asdfghjkl", Style: StyleStatus}
+	opts := Options{Alphabet: "asdfghjkl"}
 
 	term, out := keyTerminal(t, nil)
 	term.render(list, indices(list)[:2], "a", opts)
@@ -220,7 +200,7 @@ func TestRenderStatusSaysWhenNothingMatches(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
 	list := items("aa", "as")
-	term.render(list, nil, "z", Options{Alphabet: "asdfghjkl", Style: StyleStatus})
+	term.render(list, nil, "z", Options{Alphabet: "asdfghjkl"})
 	term.Flush()
 	if rows := drawnRows(out.String()); rows[1] != "no match" {
 		t.Fatalf("second row = %q, want no match", rows[1])
@@ -462,7 +442,7 @@ func TestStatusPutsTheCountOnTheMiddleRow(t *testing.T) {
 		term, out := keyTerminal(t, nil)
 		term.rows = rows
 		list := items("aa", "as", "ad")
-		term.render(list, indices(list), "", Options{Alphabet: "asdfghjkl", Style: StyleStatus})
+		term.render(list, indices(list), "", Options{Alphabet: "asdfghjkl"})
 		term.Flush()
 		if got, want := countRow(out.String()), rows/2; got != want {
 			t.Fatalf("in %d rows the count is on row %d, want the middle row %d", rows, got, want)

@@ -7,32 +7,15 @@ import (
 
 // Item is a labelled row.
 type Item struct {
-	Code  string
-	Text  string
-	Where string // pane name, blank when every item shares a pane
-	Row   int    // 0-based, shown 1-based
+	Code string
 }
 
-// Style is how the picker presents itself: a status line when hints are
-// drawn on the panes, a list when they cannot be.
-type Style int
-
-const (
-	StyleList Style = iota
-	StyleStatus
-)
-
 type Options struct {
-	Title    string
 	Alphabet string
-	Style    Style
 	// OnNarrow runs whenever the match set changes, so a caller can redraw
 	// hints the picker knows nothing about.
 	OnNarrow func(matches []int, typed string)
 }
-
-// reservedRows is the header, prompt and overflow note around the list.
-const reservedRows = 6
 
 // Pick selects a code the moment it is unambiguous, so most picks need no
 // Enter. The second result is false when the user quits or input ends.
@@ -118,11 +101,7 @@ func indices(items []Item) []int {
 }
 
 func (t *Terminal) render(items []Item, matches []int, typed string, opts Options) {
-	if opts.Style == StyleStatus {
-		t.renderStatus(len(matches), typed)
-		return
-	}
-	t.renderList(items, matches, typed, opts)
+	t.renderStatus(len(matches), typed)
 }
 
 func (t *Terminal) renderStatus(matches int, typed string) {
@@ -203,33 +182,4 @@ func centrePad(width, text int) int {
 // line, so a spare row above would carry it off the middle.
 func topPad(rows, lines int) int {
 	return max((rows-lines)/2, 0)
-}
-
-func (t *Terminal) renderList(items []Item, matches []int, typed string, opts Options) {
-	t.Clear()
-	t.Printf("Link hints (%d links, %s).\n", len(items), opts.Title)
-	t.Printf("Type a hint, Enter opens, Esc quits.\n\n")
-
-	shown := matches
-	hidden := 0
-	if limit := t.rows - reservedRows; limit > 0 && len(shown) > limit {
-		hidden = len(shown) - limit
-		shown = shown[:limit]
-	}
-	for _, i := range shown {
-		item := items[i]
-		where := ""
-		if item.Where != "" {
-			where = item.Where + " "
-		}
-		t.Printf("  %s  %s [%sr%d]\n", item.Code, item.Text, where, item.Row+1)
-	}
-	if hidden > 0 {
-		t.Printf("  ... %d more, keep typing to narrow\n", hidden)
-	}
-	if len(matches) == 0 {
-		t.Printf("\nNo match. Backspace to edit, Esc to quit.\n")
-	}
-	t.Printf("\n> %s", typed)
-	t.Flush()
 }

@@ -64,40 +64,17 @@ func TestTarget(t *testing.T) {
 	}
 }
 
-func TestScreenTitle(t *testing.T) {
-	t.Parallel()
-	labels := map[string]string{"w1:p1": "neon"}
-	if got := screenTitle([]string{"w1:p1"}, labels, "w1:p1"); got != "pane neon" {
-		t.Errorf("screenTitle() = %q", got)
-	}
-	if got := screenTitle([]string{"w1:p1"}, nil, "w1:p1"); got != "pane w1:p1" {
-		t.Errorf("screenTitle() = %q", got)
-	}
-	if got := screenTitle([]string{"w1:p1", "w1:p2"}, labels, "w1:p1"); got != "2 panes" {
-		t.Errorf("screenTitle() = %q", got)
-	}
-}
-
 func TestItemsFor(t *testing.T) {
 	t.Parallel()
 	found := []links.Link{
 		{URL: "https://a.io/x", Text: "https://a.io/x", Row: 2, Pane: "w1:p1"},
 		{URL: "https://b.io/y", Text: "#232", Row: 5, Pane: "w1:p2"},
 	}
-	labels := map[string]string{"w1:p1": "neon"}
 
 	codes := []string{"a", "s"}
-	got := itemsFor(found, codes, labels, true)
-	if got[0].Where != "neon" || got[1].Where != "w1:p2" {
-		t.Fatalf("itemsFor() panes = %q, %q", got[0].Where, got[1].Where)
-	}
+	got := itemsFor(found, codes)
 	if assigned := []string{got[0].Code, got[1].Code}; !reflect.DeepEqual(assigned, codes) {
 		t.Fatalf("itemsFor() codes = %+v", assigned)
-	}
-
-	single := itemsFor(found, codes, labels, false)
-	if single[0].Where != "" || single[1].Where != "" {
-		t.Fatal("a single-pane screen should not label rows with a pane")
 	}
 }
 
@@ -218,29 +195,23 @@ var retinaCell = herdr.Graphics{CellWidthPx: 19, CellHeightPx: 42}
 // Not parallel: these cases set environment variables.
 func TestPaneShape(t *testing.T) {
 	t.Run("annotate is square in pixels, not in cells", func(t *testing.T) {
-		width, height := paneShape(modeAnnotate, retinaCell)
+		width, height := paneShape(retinaCell)
 		if width != "11" || height != "5" {
-			t.Fatalf("paneShape(%q) = %q, %q", modeAnnotate, width, height)
+			t.Fatalf("paneShape() = %q, %q", width, height)
 		}
 	})
 	t.Run("a terminal that reported no cell size still gets a shape", func(t *testing.T) {
-		width, height := paneShape(modeAnnotate, herdr.Graphics{})
+		width, height := paneShape(herdr.Graphics{})
 		if width != "10" || height != "5" {
-			t.Fatalf("paneShape(%q) = %q, %q", modeAnnotate, width, height)
-		}
-	})
-	t.Run("the list fallback keeps room for a list", func(t *testing.T) {
-		width, height := paneShape(modeList, retinaCell)
-		if width != "80%" || height != "60%" {
-			t.Fatalf("paneShape(%q) = %q, %q", modeList, width, height)
+			t.Fatalf("paneShape() = %q, %q", width, height)
 		}
 	})
 	t.Run("the environment overrides both", func(t *testing.T) {
 		t.Setenv("HINTS_WIDTH", "40")
 		t.Setenv("HINTS_HEIGHT", "10")
-		width, height := paneShape(modeAnnotate, retinaCell)
+		width, height := paneShape(retinaCell)
 		if width != "40" || height != "10" {
-			t.Fatalf("paneShape(%q) = %q, %q", modeAnnotate, width, height)
+			t.Fatalf("paneShape() = %q, %q", width, height)
 		}
 	})
 }
@@ -261,21 +232,15 @@ func TestSquareColsTracksTheCellAspect(t *testing.T) {
 // Not parallel: these cases set environment variables.
 func TestPaneFor(t *testing.T) {
 	t.Run("annotate gets the square popup", func(t *testing.T) {
-		got := paneFor(modeAnnotate, retinaCell)
+		got := paneFor(retinaCell)
 		if got.Placement != "popup" || got.Width != "11" || got.Height != "5" {
-			t.Fatalf("paneFor(%q) = %+v", modeAnnotate, got)
-		}
-	})
-	t.Run("the list fallback stays a sized popup", func(t *testing.T) {
-		got := paneFor(modeList, retinaCell)
-		if got.Placement != "popup" || got.Width != "80%" || got.Height != "60%" {
-			t.Fatalf("paneFor(%q) = %+v", modeList, got)
+			t.Fatalf("paneFor() = %+v", got)
 		}
 	})
 	// Only a popup takes a size, so any other placement must ask for none.
 	t.Run("the environment overrides the placement", func(t *testing.T) {
 		t.Setenv("HINTS_PLACEMENT", "overlay")
-		got := paneFor(modeAnnotate, retinaCell)
+		got := paneFor(retinaCell)
 		if got.Placement != "overlay" || got.Width != "" || got.Height != "" {
 			t.Fatalf("paneFor() = %+v", got)
 		}
