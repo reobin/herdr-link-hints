@@ -216,14 +216,7 @@ func pick() int {
 	}
 
 	codes := hints.Codes(len(found), hints.DefaultAlphabet)
-	opts := ui.Options{Alphabet: hints.DefaultAlphabet}
-	if !marks.live() {
-		term.Pause("no layer")
-		return exitFailed
-	}
-	opts.OnNarrow = func(matches []int, typed string) {
-		marks.draw(ctx, badgesFor(found, codes, matches, typed))
-	}
+	opts := narrowOpts(ctx, marks, found, codes)
 
 	index, picked := ui.Pick(term, itemsFor(found, codes), opts)
 	if !picked {
@@ -342,6 +335,20 @@ func itemsFor(found []links.Link, codes []string) []ui.Item {
 		items[i] = ui.Item{Code: codes[i]}
 	}
 	return items
+}
+
+// narrowOpts wires badge redraws while there is somewhere to draw. Without
+// a graphics layer the pick continues as a code list: the count and echo
+// readout needs no overlay.
+func narrowOpts(ctx context.Context, marks *marker, found []links.Link, codes []string) ui.Options {
+	opts := ui.Options{Alphabet: hints.DefaultAlphabet}
+	if !marks.live() {
+		return opts
+	}
+	opts.OnNarrow = func(matches []int, typed string) {
+		marks.draw(ctx, badgesFor(found, codes, matches, typed))
+	}
+	return opts
 }
 
 // badgesFor dims the links a prefix has ruled out rather than removing
