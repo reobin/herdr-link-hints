@@ -55,9 +55,11 @@ func Load(program string) (Colors, bool) {
 }
 
 // Save remembers a full live reply for the next run under this program
-// name. An empty program name saves nothing. Only call it with all three
+// name. An empty program name saves nothing. Only call it with all five
 // colours parsed: Terminal.Theme starts from the fallback, so a partial
-// reply is indistinguishable here from a full one.
+// reply is indistinguishable here from a full one. A cache written before
+// the red and blue accents existed misses on load, so the next run
+// re-probes live once and then rides the cache again.
 func Save(program string, colors Colors) error {
 	if cachingDisabled() {
 		return nil
@@ -102,7 +104,8 @@ func Save(program string, colors Colors) error {
 }
 
 func opaque(c Colors) bool {
-	return c.Foreground.A == 0xFF && c.Background.A == 0xFF && c.Accent.A == 0xFF
+	return c.Foreground.A == 0xFF && c.Background.A == 0xFF && c.AccentRed.A == 0xFF &&
+		c.Accent.A == 0xFF && c.AccentBlue.A == 0xFF
 }
 
 // cachePath resolves where this program's reply lives. The second result

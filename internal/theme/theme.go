@@ -4,20 +4,28 @@ package theme
 
 import (
 	"image/color"
+	"math"
 	"strconv"
 	"strings"
 )
 
-// OSC report keys: 10 is the default foreground, 11 the background, 4;3
-// the palette's yellow.
+// OSC report keys: 10 is the default foreground, 11 the background, 4;1
+// the palette's red, 4;3 its yellow, 4;4 its blue. The badge background is
+// whichever of the three reads best against the background.
 const (
 	KeyForeground = "10"
 	KeyBackground = "11"
+	KeyAccentRed  = "4;1"
 	KeyAccent     = "4;3"
+	KeyAccentBlue = "4;4"
 )
 
 // Keys is every colour the overlay asks for.
-var Keys = []string{KeyForeground, KeyBackground, KeyAccent}
+var Keys = []string{KeyForeground, KeyBackground, KeyAccentRed, KeyAccent, KeyAccentBlue}
+
+// MinBadgeContrast is the floor for a readable badge: below 3:1 the badge
+// is a smudge, so tests treat it as a bug.
+const MinBadgeContrast = 3.0
 
 // Query is the escape sequence that asks for one colour.
 func Query(key string) string { return "\x1b]" + key + ";?\x1b\\" }
@@ -25,7 +33,9 @@ func Query(key string) string { return "\x1b]" + key + ";?\x1b\\" }
 type Colors struct {
 	Foreground color.RGBA
 	Background color.RGBA
+	AccentRed  color.RGBA
 	Accent     color.RGBA
+	AccentBlue color.RGBA
 }
 
 // Fallback is what a terminal that answers nothing gets.
@@ -33,7 +43,9 @@ func Fallback() Colors {
 	return Colors{
 		Foreground: Opaque(color.White),
 		Background: Opaque(color.Black),
+		AccentRed:  Opaque(color.White),
 		Accent:     Opaque(color.White),
+		AccentBlue: Opaque(color.White),
 	}
 }
 
@@ -43,9 +55,48 @@ func (c *Colors) Set(key string, rgb color.RGBA) {
 		c.Foreground = rgb
 	case KeyBackground:
 		c.Background = rgb
+	case KeyAccentRed:
+		c.AccentRed = rgb
 	case KeyAccent:
 		c.Accent = rgb
+	case KeyAccentBlue:
+		c.AccentBlue = rgb
 	}
+}
+
+// BestAccent picks the palette entry with the most contrast against the
+// background. Yellow wins on dark themes; on light ones red or blue does.
+// A partial reply leaves an alternate at the fallback white, which scores
+// low on a light background and loses on merit, so no special-casing.
+func BestAccent(c Colors) (color.RGBA, float64) {
+	best, bestScore := c.Accent, Contrast(c.Accent, c.Background)
+	if score := Contrast(c.AccentRed, c.Background); score > bestScore {
+		best, bestScore = c.AccentRed, score
+	}
+	if score := Contrast(c.AccentBlue, c.Background); score > bestScore {
+		best, bestScore = c.AccentBlue, score
+	}
+	return best, bestScore
+}
+
+// Contrast is the WCAG contrast ratio of two opaque colours.
+func Contrast(a, b color.RGBA) float64 {
+	la, lb := luminance(a), luminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+func luminance(c color.RGBA) float64 {
+	linear := func(v uint8) float64 {
+		s := float64(v) / 0xFF
+		if s <= 0.03928 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linear(c.R) + 0.7152*linear(c.G) + 0.0722*linear(c.B)
 }
 
 // Parse reads one OSC colour report. Components come back as hex of any

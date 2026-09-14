@@ -301,7 +301,9 @@ func TestThemeReadsTheTerminalsColours(t *testing.T) {
 	themeEnv(t, "test-live-read")
 	replies := "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" +
 		"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\" +
-		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\"
+		"\x1b]4;1;rgb:dcdc/3232/2f2f\x1b\\" +
+		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\" +
+		"\x1b]4;4;rgb:2626/8b8b/d2d2\x1b\\"
 	term, out := keyTerminal(t, []byte(replies))
 
 	got := term.Theme()
@@ -311,8 +313,14 @@ func TestThemeReadsTheTerminalsColours(t *testing.T) {
 	if got.Background != (color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF}) {
 		t.Fatalf("Background = %+v", got.Background)
 	}
+	if got.AccentRed != (color.RGBA{R: 0xDC, G: 0x32, B: 0x2F, A: 0xFF}) {
+		t.Fatalf("AccentRed = %+v", got.AccentRed)
+	}
 	if got.Accent != (color.RGBA{R: 0xF9, G: 0xE2, B: 0xAF, A: 0xFF}) {
 		t.Fatalf("Accent = %+v", got.Accent)
+	}
+	if got.AccentBlue != (color.RGBA{R: 0x26, G: 0x8B, B: 0xD2, A: 0xFF}) {
+		t.Fatalf("AccentBlue = %+v", got.AccentBlue)
 	}
 	term.Flush()
 	for _, key := range theme.Keys {
@@ -344,6 +352,9 @@ func TestThemeKeepsWhatDidArrive(t *testing.T) {
 	}
 	if got.Accent != theme.Fallback().Accent {
 		t.Fatalf("Accent = %+v, want the fallback", got.Accent)
+	}
+	if got.AccentRed != theme.Fallback().AccentRed || got.AccentBlue != theme.Fallback().AccentBlue {
+		t.Fatalf("alternates = %+v, %+v, want the fallback", got.AccentRed, got.AccentBlue)
 	}
 	if _, ok := theme.Load("test-partial"); ok {
 		t.Fatal("Theme() saved a partial reply")
@@ -423,7 +434,9 @@ func TestThemeUsesTheCache(t *testing.T) {
 	want := theme.Colors{
 		Foreground: color.RGBA{R: 0xCD, G: 0xD6, B: 0xF4, A: 0xFF},
 		Background: color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF},
+		AccentRed:  color.RGBA{R: 0xDC, G: 0x32, B: 0x2F, A: 0xFF},
 		Accent:     color.RGBA{R: 0xF9, G: 0xE2, B: 0xAF, A: 0xFF},
+		AccentBlue: color.RGBA{R: 0x26, G: 0x8B, B: 0xD2, A: 0xFF},
 	}
 	if err := theme.Save("test-cached", want); err != nil {
 		t.Fatal(err)
@@ -443,7 +456,9 @@ func TestThemeSavesAFullReply(t *testing.T) {
 	themeEnv(t, "test-live")
 	replies := "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" +
 		"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\" +
-		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\"
+		"\x1b]4;1;rgb:dcdc/3232/2f2f\x1b\\" +
+		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\" +
+		"\x1b]4;4;rgb:2626/8b8b/d2d2\x1b\\"
 	term, _ := keyTerminal(t, []byte(replies))
 	got := term.Theme()
 	if _, ok := theme.Load("test-live"); !ok {

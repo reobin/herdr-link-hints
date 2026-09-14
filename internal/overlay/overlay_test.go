@@ -3,6 +3,7 @@ package overlay
 import (
 	"bytes"
 	"image"
+	"image/color"
 	"image/png"
 	"strings"
 	"testing"
@@ -198,6 +199,29 @@ func notScrim(img image.Image) (int, int, bool) {
 		}
 	}
 	return 0, 0, false
+}
+
+// The badge takes the palette entry with the most contrast against the
+// background, so a light theme does not get yellow-on-cream.
+func TestPalettePicksTheHighestContrastAccent(t *testing.T) {
+	t.Parallel()
+	light := theme.Colors{
+		Background: color.RGBA{R: 0xFD, G: 0xF6, B: 0xE3, A: 0xFF},
+		AccentRed:  color.RGBA{R: 0xDC, G: 0x32, B: 0x2F, A: 0xFF},
+		Accent:     color.RGBA{R: 0xB5, G: 0x89, B: 0x00, A: 0xFF},
+		AccentBlue: color.RGBA{R: 0x26, G: 0x8B, B: 0xD2, A: 0xFF},
+	}
+	want, score := theme.BestAccent(light)
+	if score < theme.MinBadgeContrast {
+		t.Fatalf("fixture winner = %.2f:1, want at least %.1f:1", score, theme.MinBadgeContrast)
+	}
+	got := newPalette(light)
+	if got[colorBackground] != want {
+		t.Fatalf("badge background = %+v, want %+v", got[colorBackground], want)
+	}
+	if got[colorBackground] == (color.RGBA{R: 0xB5, G: 0x89, B: 0x00, A: 0xFF}) {
+		t.Fatal("badge background kept the low-contrast yellow")
+	}
 }
 
 func TestRenderRejectsAnUnknownCellSize(t *testing.T) {
