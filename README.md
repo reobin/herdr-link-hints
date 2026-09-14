@@ -45,25 +45,26 @@ deterministic:
 ```sh
 go build -trimpath -o picker .
 echo a | ./picker --demo
-vhs demo.tape
 ```
 
-`demo.gif` plays a synthetic session: plain pane output, a keypress,
-hints fading in over dimmed text, narrowing to one match, opening it.
-Rebuild it after any overlay or demo change:
+`demo.gif` plays a synthetic session: the pane at rest, a keypress,
+hints easing in over the dimmed text, the typed code narrowing them to
+one, the pick opening. Rebuild it after any
+overlay or demo change:
 
 ```sh
 ./build-demo-gif.sh
 ```
 
-The script renders `internal/demo/testdata/pane.txt` with ImageMagick
-(`DEMO_FONT` overrides the typeface) and composites each golden frame
-over it. `pane.txt` is freshness-checked against `PaneLines()`, so the
-background can never drift from the badge coordinates.
+Every layer is drawn at the gif's own resolution. `pane.txt` is set with
+ImageMagick in JetBrains Mono (`DEMO_FONT` overrides the typeface), and the hints come from the plugin's own renderer through
+`go run ./internal/demo/frames`, at the cell size the gif uses rather
+than the goldens'. `pane.txt` is freshness-checked against `PaneLines()`,
+so the background can never drift from the badge coordinates.
 
 Refresh the goldens with `UPDATE_GOLDEN=1 go test ./internal/demo/`.
 `TestRenderBudget` fails the build when a full-screen render exceeds
-2s; `go test -bench . ./...` tracks render speed.
+2s, or 10s under the race detector; `go test -bench . ./...` tracks render speed.
 
 The hints are drawn with Herdr's pane graphics, which need a terminal
 with Kitty graphics support, and in the colours the terminal reports for

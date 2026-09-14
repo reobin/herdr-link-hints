@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/reobin/herdr-link-hints/internal/browse"
-	"github.com/reobin/herdr-link-hints/internal/cells"
 	"github.com/reobin/herdr-link-hints/internal/demo"
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/hints"
@@ -378,43 +377,9 @@ func narrowOpts(ctx context.Context, marks *marker, found []links.Link, codes []
 		return opts
 	}
 	opts.OnNarrow = func(matches []int, typed string) {
-		marks.draw(ctx, badgesFor(found, codes, matches, typed))
+		marks.draw(ctx, hints.Badges(found, codes, matches, typed))
 	}
 	return opts
-}
-
-// badgesFor dims the links a prefix has ruled out rather than removing
-// them, so narrowing does not rearrange the screen. The typed prefix is
-// marked on each badge, so the screen shows what the readout has echoed.
-func badgesFor(found []links.Link, codes []string, matches []int, typed string) map[string][]overlay.Badge {
-	matched := make(map[int]bool, len(matches))
-	for _, i := range matches {
-		matched[i] = true
-	}
-	badges := make(map[string][]overlay.Badge, len(found))
-	for i, link := range found {
-		badges[link.Pane] = append(badges[link.Pane], overlay.Badge{
-			Row:    link.Row,
-			Col:    link.Col,
-			Before: link.Before,
-			Width:  cells.Width(link.Text),
-			Code:   codes[i],
-			Dim:    !matched[i],
-			Typed:  commonPrefix(codes[i], typed),
-		})
-	}
-	return badges
-}
-
-// commonPrefix counts the leading runes code and typed share, so a ruled-out
-// badge never claims more than it matches.
-func commonPrefix(code, typed string) int {
-	cr, tr := []rune(code), []rune(typed)
-	n := 0
-	for n < len(cr) && n < len(tr) && cr[n] == tr[n] {
-		n++
-	}
-	return n
 }
 
 func paneScrolls(ctx context.Context, client *herdr.Client, panes []string, log *slog.Logger) map[string]herdr.Scroll {

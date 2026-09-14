@@ -2,8 +2,10 @@
 package demo
 
 import (
+	"image/color"
 	"strings"
 
+	"github.com/reobin/herdr-link-hints/internal/ansi"
 	"github.com/reobin/herdr-link-hints/internal/cells"
 	"github.com/reobin/herdr-link-hints/internal/hints"
 	"github.com/reobin/herdr-link-hints/internal/links"
@@ -23,17 +25,30 @@ func Viewport() overlay.Size { return overlay.Size{Cols: Cols, Rows: Rows} }
 
 func Cell() overlay.Cell { return overlay.Cell{Width: CellW, Height: CellH} }
 
-func Colors() theme.Colors { return theme.Fallback() }
-
-func Links() []links.Link {
-	return []links.Link{
-		{URL: "https://a.io/quickstart", Text: "https://a.io/quickstart", Kind: links.Text, Row: 2, Col: 4, Pane: Pane, Before: 3},
-		{URL: "https://a.io/api", Text: "https://a.io/api", Kind: links.Text, Row: 5, Col: 10, Pane: Pane, Before: 4},
-		{URL: "https://github.com/o/r/pull/232", Text: "#232", Kind: links.Text, Row: 9, Col: 0, Pane: Pane, Before: 0},
-		{URL: "https://b.io/guide", Text: "https://b.io/guide", Kind: links.Text, Row: 12, Col: 20, Pane: Pane, Before: 1},
-		{URL: "https://www.example.com", Text: "www.example.com", Kind: links.Text, Row: 18, Col: 30, Pane: Pane, Before: 2},
-		{URL: "https://c.io/x", Text: "https://c.io/x", Kind: links.Text, Row: 22, Col: 8, Pane: Pane, Before: 5},
+// Colors is a typical dark palette, as a terminal would report it: the
+// demo shows the badge in the theme's own accent, not the all-white
+// fallback.
+func Colors() theme.Colors {
+	return theme.Colors{
+		Foreground: color.RGBA{R: 0xC0, G: 0xCA, B: 0xF5, A: 0xFF},
+		Background: color.RGBA{R: 0x1A, G: 0x1B, B: 0x26, A: 0xFF},
+		AccentRed:  color.RGBA{R: 0xF7, G: 0x76, B: 0x8E, A: 0xFF},
+		Accent:     color.RGBA{R: 0xE0, G: 0xAF, B: 0x68, A: 0xFF},
+		AccentBlue: color.RGBA{R: 0x7A, G: 0xA2, B: 0xF7, A: 0xFF},
 	}
+}
+
+// Links runs the real scanner over PaneLines, plus one hidden OSC 8 link
+// anchored on #232, so every URL the pane shows gets a hint and each
+// badge sits where the plugin would put it.
+func Links() []links.Link {
+	lines := PaneLines()
+	hidden := []ansi.Link{{URL: "https://github.com/o/r/pull/232", Label: "#232"}}
+	found := links.Merge(lines, links.FromLines(lines, nil), hidden)
+	for i := range found {
+		found[i].Pane = Pane
+	}
+	return found
 }
 
 func Ranked() []links.Link {
@@ -45,34 +60,7 @@ func Codes() []string {
 }
 
 func Badges(matches []int, typed string) []overlay.Badge {
-	found := Ranked()
-	codes := Codes()
-	matched := make(map[int]bool, len(matches))
-	for _, i := range matches {
-		matched[i] = true
-	}
-	badges := make([]overlay.Badge, len(found))
-	for i, link := range found {
-		badges[i] = overlay.Badge{
-			Row:    link.Row,
-			Col:    link.Col,
-			Before: link.Before,
-			Width:  cells.Width(link.Text),
-			Code:   codes[i],
-			Dim:    !matched[i],
-			Typed:  commonPrefix(codes[i], typed),
-		}
-	}
-	return badges
-}
-
-func commonPrefix(code, typed string) int {
-	cr, tr := []rune(code), []rune(typed)
-	n := 0
-	for n < len(cr) && n < len(tr) && cr[n] == tr[n] {
-		n++
-	}
-	return n
+	return hints.Badges(Ranked(), Codes(), matches, typed)[Pane]
 }
 
 func all() []int {
@@ -84,19 +72,15 @@ func all() []int {
 	return out
 }
 
-func SceneFull() overlay.Scene {
-	return overlay.Scene{Badges: Badges(all(), ""), Colors: Colors(), Cell: Cell(), Viewport: Viewport()}
-}
-
-func SceneNarrowed() overlay.Scene {
-	return overlay.Scene{Badges: Badges([]int{0}, Codes()[0]), Colors: Colors(), Cell: Cell(), Viewport: Viewport()}
-}
-
-func SceneTyped() overlay.Scene {
-	codes := Codes()
-	badges := Badges(all(), codes[0])
+func scene(badges []overlay.Badge) overlay.Scene {
 	return overlay.Scene{Badges: badges, Colors: Colors(), Cell: Cell(), Viewport: Viewport()}
 }
+
+func SceneFull() overlay.Scene { return scene(Badges(all(), "")) }
+
+func SceneNarrowed() overlay.Scene { return scene(Badges([]int{0}, Codes()[0])) }
+
+func SceneTyped() overlay.Scene { return scene(Badges(all(), Codes()[0])) }
 
 func Scenes() map[string]overlay.Scene {
 	return map[string]overlay.Scene{
@@ -123,15 +107,15 @@ func PaneLines() []string {
 		at(0, "#232", "", " fixes the empty-state crash"),
 		"232 is the same issue as above.",
 		"",
-		at(20, "https://b.io/guide", "merged the notes FF", " for details"),
-		"the guide covers install and keys.",
+		at(5, "https://b.io/guide", "read", " first"),
+		"it covers install and keys.",
 		"$ herdr server reload-config",
 		"reloaded.",
 		"",
 		"examples live on the site.",
 		at(30, "www.example.com", "demo pane: six links", " and more"),
 		"more links below.",
-		"$ open https://c.io/x",
+		"$ open the docs",
 		"opened in the browser.",
 		at(8, "https://c.io/x", "$", " is nearest the cursor"),
 		"$ ",

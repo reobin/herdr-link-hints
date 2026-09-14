@@ -20,10 +20,10 @@ type Options struct {
 // Pick selects a code the moment it is unambiguous, so most picks need no
 // Enter. The second result is false when the user quits or input ends.
 func Pick(t *Terminal, items []Item, opts Options) (int, bool) {
+	// Line mode reads a code from a pipe, and stdout may still be a screen:
+	// the centred status would clear it.
 	if !t.interactive() {
-		all := indices(items)
-		narrow(opts, all, "")
-		t.render(items, all, "", opts)
+		narrow(opts, indices(items), "")
 		return t.pickByLine(items)
 	}
 	typed := ""

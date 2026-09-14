@@ -7,7 +7,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
-const renderBudget = 2 * time.Second
+const renderBudget = 2 * time.Second * budgetFactor
 
 func fullScreenScene() Scene {
 	viewport := Size{Cols: 204, Rows: 57}

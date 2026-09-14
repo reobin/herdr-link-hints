@@ -10,15 +10,15 @@ repro: open an empty pane, press the key.
 #232 fixes the empty-state crash
 232 is the same issue as above.
 
-merged the notes FF https://b.io/guide for details
-the guide covers install and keys.
+read https://b.io/guide first
+it covers install and keys.
 $ herdr server reload-config
 reloaded.
 
 examples live on the site.
 demo pane: six links          www.example.com and more
 more links below.
-$ open https://c.io/x
+$ open the docs
 opened in the browser.
 $       https://c.io/x is nearest the cursor
 $ 
