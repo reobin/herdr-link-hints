@@ -7,14 +7,13 @@ import (
 
 // Item is a labelled row.
 type Item struct {
-	Code  string
-	Text  string
-	Where string // pane name, blank when every item shares a pane
-	Row   int    // 0-based, shown 1-based
+	Code string
+	Text string
+	Row  int // 0-based, shown 1-based
 }
 
 // Style is how the picker presents itself: a status line when hints are
-// drawn on the panes, a list when they cannot be.
+// drawn on the pane, a list when they cannot be.
 type Style int
 
 const (
@@ -218,11 +217,7 @@ func (t *Terminal) renderList(items []Item, matches []int, typed string, opts Op
 	}
 	for _, i := range shown {
 		item := items[i]
-		where := ""
-		if item.Where != "" {
-			where = item.Where + " "
-		}
-		t.Printf("  %s  %s [%sr%d]\n", item.Code, item.Text, where, item.Row+1)
+		t.Printf("  %s  %s [r%d]\n", item.Code, item.Text, item.Row+1)
 	}
 	if hidden > 0 {
 		t.Printf("  ... %d more, keep typing to narrow\n", hidden)

@@ -79,17 +79,17 @@ type Pane struct {
 	Height int
 }
 
-// ScreenPanes lists the panes sharing a screen with the given one, and
-// falls back to that pane alone when the layout cannot be read.
-func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]Pane, error) {
+// PaneRect measures one pane. Herdr answers with the whole screen it sits
+// on, so the pane has to be picked back out of the layout.
+func (c *Client) PaneRect(ctx context.Context, pane string) (Pane, error) {
 	out, err := c.run(ctx, "pane", "layout", "--pane", pane)
 	if err != nil {
-		return []Pane{{ID: pane}}, err
+		return Pane{ID: pane}, err
 	}
-	return parseScreenPanes(out, pane)
+	return parsePaneRect(out, pane)
 }
 
-func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
+func parsePaneRect(out []byte, want string) (Pane, error) {
 	var payload struct {
 		Result struct {
 			Layout struct {
@@ -104,64 +104,14 @@ func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
-		return []Pane{{ID: fallback}}, fmt.Errorf("parse pane layout: %w", err)
+		return Pane{ID: want}, fmt.Errorf("parse pane layout: %w", err)
 	}
-	var panes []Pane
 	for _, p := range payload.Result.Layout.Panes {
-		if p.PaneID != "" {
-			panes = append(panes, Pane{ID: p.PaneID, Width: p.Rect.Width, Height: p.Rect.Height})
+		if p.PaneID == want {
+			return Pane{ID: want, Width: p.Rect.Width, Height: p.Rect.Height}, nil
 		}
 	}
-	if len(panes) == 0 {
-		return []Pane{{ID: fallback}}, nil
-	}
-	return panes, nil
-}
-
-// PaneLabels gives every requested pane an entry, falling back to the tail
-// of its ID.
-func (c *Client) PaneLabels(ctx context.Context, panes []string) (map[string]string, error) {
-	labels := defaultLabels(panes)
-	out, err := c.run(ctx, "pane", "list")
-	if err != nil {
-		return labels, err
-	}
-	return parsePaneLabels(out, labels)
-}
-
-func defaultLabels(panes []string) map[string]string {
-	labels := make(map[string]string, len(panes))
-	for _, pane := range panes {
-		labels[pane] = shortID(pane)
-	}
-	return labels
-}
-
-func parsePaneLabels(out []byte, labels map[string]string) (map[string]string, error) {
-	var payload struct {
-		Result struct {
-			Panes []struct {
-				PaneID string `json:"pane_id"`
-				Label  string `json:"label"`
-			} `json:"panes"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(out, &payload); err != nil {
-		return labels, fmt.Errorf("parse pane list: %w", err)
-	}
-	for _, info := range payload.Result.Panes {
-		if _, wanted := labels[info.PaneID]; wanted && info.Label != "" {
-			labels[info.PaneID] = info.Label
-		}
-	}
-	return labels, nil
-}
-
-func shortID(pane string) string {
-	if i := strings.LastIndex(pane, ":"); i >= 0 {
-		return pane[i+1:]
-	}
-	return pane
+	return Pane{ID: want}, fmt.Errorf("pane %s is not in the layout", want)
 }
 
 // Scroll is a pane's scroll state. Offset is how far scrollback reaches
@@ -171,18 +121,26 @@ type Scroll struct {
 	ViewportRows int
 }
 
-func (c *Client) PaneScroll(ctx context.Context, pane string) (Scroll, error) {
-	out, err := c.run(ctx, "pane", "get", pane)
-	if err != nil {
-		return Scroll{}, err
-	}
-	return parsePaneScroll(out)
+// PaneInfo is what one `herdr pane get` answers with. Label is never
+// empty: a pane Herdr has not named falls back to the tail of its ID.
+type PaneInfo struct {
+	Label  string
+	Scroll Scroll
 }
 
-func parsePaneScroll(out []byte) (Scroll, error) {
+func (c *Client) PaneInfo(ctx context.Context, pane string) (PaneInfo, error) {
+	out, err := c.run(ctx, "pane", "get", pane)
+	if err != nil {
+		return PaneInfo{Label: shortID(pane)}, err
+	}
+	return parsePaneInfo(out, pane)
+}
+
+func parsePaneInfo(out []byte, pane string) (PaneInfo, error) {
 	var payload struct {
 		Result struct {
 			Pane struct {
+				Label  string `json:"label"`
 				Scroll struct {
 					MaxOffsetFromBottom int `json:"max_offset_from_bottom"`
 					ViewportRows        int `json:"viewport_rows"`
@@ -191,10 +149,24 @@ func parsePaneScroll(out []byte) (Scroll, error) {
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
-		return Scroll{}, fmt.Errorf("parse pane get: %w", err)
+		return PaneInfo{Label: shortID(pane)}, fmt.Errorf("parse pane get: %w", err)
 	}
-	scroll := payload.Result.Pane.Scroll
-	return Scroll{Offset: scroll.MaxOffsetFromBottom, ViewportRows: scroll.ViewportRows}, nil
+	info := payload.Result.Pane
+	label := info.Label
+	if label == "" {
+		label = shortID(pane)
+	}
+	return PaneInfo{
+		Label:  label,
+		Scroll: Scroll{Offset: info.Scroll.MaxOffsetFromBottom, ViewportRows: info.Scroll.ViewportRows},
+	}, nil
+}
+
+func shortID(pane string) string {
+	if i := strings.LastIndex(pane, ":"); i >= 0 {
+		return pane[i+1:]
+	}
+	return pane
 }
 
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {

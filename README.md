@@ -1,8 +1,8 @@
 # herdr-link-hints
 
 Vimium-style keyboard link hints for [Herdr](https://herdr.dev).
-Tap a key, get a hint code drawn beside every link on screen, type the
-code to open it.
+Tap a key, get a hint code drawn beside every link in the focused pane,
+type the code to open it.
 
 ## Install
 
@@ -26,10 +26,11 @@ description = "hint links in focused pane"
 
 ## Use
 
-Press the bound key. Every link on screen is underlined and gets a hint
-code beside it, and the rest of the screen dims. Type the code; hints
-that no longer match fade, and the match opens as soon as it is
-unambiguous. Backspace edits, Enter opens a single match, Esc quits.
+Press the bound key. Every link in the focused pane is underlined and
+gets a hint code beside it, and the rest of that pane dims. Other panes
+are left alone. Type the code; hints that no longer match fade, and the
+match opens as soon as it is unambiguous. Backspace edits, Enter opens a
+single match, Esc quits.
 
 A small popup shows how many hints are left, and says `no match` when a
 prefix has ruled them all out.

@@ -13,8 +13,9 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/links"
 )
 
-// fakeSource answers pane reads from a table. A Scanner reads panes
-// concurrently, so the counters are guarded.
+// fakeSource answers pane reads from a table. A Scanner reads the
+// snapshot and the observe stream concurrently, so the counters are
+// guarded.
 type fakeSource struct {
 	text    map[[2]string][]string
 	hidden  map[string][]ansi.Link
@@ -71,18 +72,14 @@ func (f *fakeSource) readCount(pane, source string) int {
 	return f.reads[[2]string{pane, source}]
 }
 
-// panes sizes every pane the same: only the observe call cares, and the
-// cases that do not exercise it do not care what the number is.
-func panes(ids ...string) []Pane {
-	out := make([]Pane, len(ids))
-	for i, id := range ids {
-		out[i] = Pane{ID: id, Cols: 100, Rows: 40}
-	}
-	return out
+// pane is a stock size: only the observe call cares, and the cases that
+// do not exercise it do not care what the number is.
+func pane(id string) Pane {
+	return Pane{ID: id, Cols: 100, Rows: 40}
 }
 
-func newScanner(source Source) *Scanner {
-	return &Scanner{Source: source, Log: slog.New(slog.DiscardHandler)}
+func newScanner(source Source, p Pane) *Scanner {
+	return &Scanner{Source: source, Pane: p, Log: slog.New(slog.DiscardHandler)}
 }
 
 func paneText(pane string, lines ...string) map[[2]string][]string {
@@ -92,29 +89,23 @@ func paneText(pane string, lines ...string) map[[2]string][]string {
 	}
 }
 
-// One destination on two panes gets a hint on each.
-func TestLinksHintsEveryCopyAcrossPanes(t *testing.T) {
+// One destination printed twice gets a hint on each copy, in screen
+// order.
+func TestLinksHintsEveryCopy(t *testing.T) {
 	t.Parallel()
-	source := &fakeSource{text: map[[2]string][]string{}}
-	for key, value := range paneText("w1:p1", "go https://a.io/x") {
-		source.text[key] = value
-	}
-	for key, value := range paneText("w1:p2", "again https://a.io/x plus https://b.io/y") {
-		source.text[key] = value
-	}
+	source := &fakeSource{text: paneText("w1:p1",
+		"go https://a.io/x",
+		"again https://a.io/x plus https://b.io/y",
+	)}
 
-	got := newScanner(source).Links(context.Background(), panes("w1:p1", "w1:p2"))
-	var pairs [][2]string
+	got := newScanner(source, pane("w1:p1")).Links(context.Background())
+	var urls []string
 	for _, l := range got {
-		pairs = append(pairs, [2]string{l.URL, l.Pane})
+		urls = append(urls, l.URL)
 	}
-	want := [][2]string{
-		{"https://a.io/x", "w1:p1"},
-		{"https://a.io/x", "w1:p2"},
-		{"https://b.io/y", "w1:p2"},
-	}
-	if !reflect.DeepEqual(pairs, want) {
-		t.Fatalf("Links() = %+v, want %+v", pairs, want)
+	want := []string{"https://a.io/x", "https://a.io/x", "https://b.io/y"}
+	if !reflect.DeepEqual(urls, want) {
+		t.Fatalf("Links() = %+v, want %+v", urls, want)
 	}
 }
 
@@ -123,7 +114,7 @@ func TestLinksHintsEveryCopyAcrossPanes(t *testing.T) {
 func TestLinksObservesAtThePaneSize(t *testing.T) {
 	t.Parallel()
 	source := &fakeSource{text: paneText("w1:p1", "nothing here")}
-	newScanner(source).Links(context.Background(), []Pane{{ID: "w1:p1", Cols: 204, Rows: 57}})
+	newScanner(source, Pane{ID: "w1:p1", Cols: 204, Rows: 57}).Links(context.Background())
 	if got, want := source.observedSize("w1:p1"), [2]int{204, 57}; got != want {
 		t.Fatalf("observed at %v, want %v", got, want)
 	}
@@ -135,7 +126,7 @@ func TestLinksIncludesHiddenTargets(t *testing.T) {
 		text:   paneText("w1:p1", "see #232 merged"),
 		hidden: map[string][]ansi.Link{"w1:p1": {{URL: "https://g.io/pull/232", Row: 0, Col: 4, Label: "#232"}}},
 	}
-	got := newScanner(source).Links(context.Background(), panes("w1:p1"))
+	got := newScanner(source, pane("w1:p1")).Links(context.Background())
 	if len(got) != 1 || got[0].URL != "https://g.io/pull/232" || got[0].Text != "#232" {
 		t.Fatalf("Links() = %+v", got)
 	}
@@ -147,9 +138,9 @@ func TestLinksSkipObserve(t *testing.T) {
 		text:   paneText("w1:p1", "see #232 merged"),
 		hidden: map[string][]ansi.Link{"w1:p1": {{URL: "https://g.io/pull/232", Label: "#232"}}},
 	}
-	scanner := newScanner(source)
+	scanner := newScanner(source, pane("w1:p1"))
 	scanner.SkipObserve = true
-	if got := scanner.Links(context.Background(), panes("w1:p1")); got != nil {
+	if got := scanner.Links(context.Background()); got != nil {
 		t.Fatalf("Links() = %+v, want nothing without observe", got)
 	}
 	if source.observeCount("w1:p1") != 0 {
@@ -160,7 +151,7 @@ func TestLinksSkipObserve(t *testing.T) {
 func TestLinksSurvivesAFailedPane(t *testing.T) {
 	t.Parallel()
 	source := &fakeSource{readErr: errors.New("pane is gone")}
-	if got := newScanner(source).Links(context.Background(), panes("w1:p1")); got != nil {
+	if got := newScanner(source, pane("w1:p1")).Links(context.Background()); got != nil {
 		t.Fatalf("Links() = %+v, want nothing", got)
 	}
 }
@@ -219,8 +210,7 @@ func TestLocate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: tc.visible}}
-			tc.choice.Pane = "w1:p1"
-			row, col, ok := newScanner(source).Locate(context.Background(), tc.choice, tc.shift)
+			row, col, ok := newScanner(source, pane("w1:p1")).Locate(context.Background(), tc.choice, tc.shift)
 			if ok != tc.wantOK || (ok && (row != tc.wantRow || col != tc.wantCol)) {
 				t.Fatalf("Locate() = %d, %d, %v; want %d, %d, %v", row, col, ok, tc.wantRow, tc.wantCol, tc.wantOK)
 			}
@@ -234,9 +224,9 @@ func TestLinksCompletesWrappedURL(t *testing.T) {
 	t.Parallel()
 	visible := []string{"go https://a.io/long-ur", "l-continued here"}
 	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
-	scanner := newScanner(source)
+	scanner := newScanner(source, Pane{ID: "w1:p1", Cols: len(visible[0]), Rows: 24})
 	scanner.SkipObserve = true
-	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
+	got := scanner.Links(context.Background())
 	if len(got) != 1 || got[0].URL != "https://a.io/long-url-continued" {
 		t.Fatalf("Links() = %+v", got)
 	}
@@ -251,9 +241,9 @@ func TestLinksLeavesAShortLineAlone(t *testing.T) {
 	t.Parallel()
 	visible := []string{"go https://a.io/long-ur", "l-continued here"}
 	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
-	scanner := newScanner(source)
+	scanner := newScanner(source, Pane{ID: "w1:p1", Cols: 100, Rows: 24})
 	scanner.SkipObserve = true
-	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: 100, Rows: 24}})
+	got := scanner.Links(context.Background())
 	if len(got) != 1 || got[0].URL != "https://a.io/long-ur" {
 		t.Fatalf("Links() = %+v", got)
 	}
@@ -263,9 +253,9 @@ func TestLinksCompletesURLWrappedAfterADot(t *testing.T) {
 	t.Parallel()
 	visible := []string{"see https://docs.a.io/guide/v2.", "1/install here"}
 	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
-	scanner := newScanner(source)
+	scanner := newScanner(source, Pane{ID: "w1:p1", Cols: len(visible[0]), Rows: 24})
 	scanner.SkipObserve = true
-	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
+	got := scanner.Links(context.Background())
 	if len(got) != 1 || got[0].URL != "https://docs.a.io/guide/v2.1/install" {
 		t.Fatalf("Links() = %+v", got)
 	}
@@ -274,9 +264,9 @@ func TestLinksCompletesURLWrappedAfterADot(t *testing.T) {
 func TestLinksNeverReadsScrollback(t *testing.T) {
 	t.Parallel()
 	source := &fakeSource{text: paneText("w1:p1", "go https://a.io/x here")}
-	scanner := newScanner(source)
+	scanner := newScanner(source, pane("w1:p1"))
 	scanner.SkipObserve = true
-	got := scanner.Links(context.Background(), panes("w1:p1"))
+	got := scanner.Links(context.Background())
 	if len(got) != 1 || got[0].URL != "https://a.io/x" {
 		t.Fatalf("Links() = %+v", got)
 	}

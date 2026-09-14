@@ -8,6 +8,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
 	"github.com/reobin/herdr-link-hints/internal/overlay"
+	"github.com/reobin/herdr-link-hints/internal/ui"
 )
 
 func TestTarget(t *testing.T) {
@@ -64,40 +65,21 @@ func TestTarget(t *testing.T) {
 	}
 }
 
-func TestScreenTitle(t *testing.T) {
-	t.Parallel()
-	labels := map[string]string{"w1:p1": "neon"}
-	if got := screenTitle([]string{"w1:p1"}, labels, "w1:p1"); got != "pane neon" {
-		t.Errorf("screenTitle() = %q", got)
-	}
-	if got := screenTitle([]string{"w1:p1"}, nil, "w1:p1"); got != "pane w1:p1" {
-		t.Errorf("screenTitle() = %q", got)
-	}
-	if got := screenTitle([]string{"w1:p1", "w1:p2"}, labels, "w1:p1"); got != "2 panes" {
-		t.Errorf("screenTitle() = %q", got)
-	}
-}
-
 func TestItemsFor(t *testing.T) {
 	t.Parallel()
 	found := []links.Link{
-		{URL: "https://a.io/x", Text: "https://a.io/x", Row: 2, Pane: "w1:p1"},
-		{URL: "https://b.io/y", Text: "#232", Row: 5, Pane: "w1:p2"},
+		{URL: "https://a.io/x", Text: "https://a.io/x", Row: 2},
+		{URL: "https://b.io/y", Text: "#232", Row: 5},
 	}
-	labels := map[string]string{"w1:p1": "neon"}
-
 	codes := []string{"a", "s"}
-	got := itemsFor(found, codes, labels, true)
-	if got[0].Where != "neon" || got[1].Where != "w1:p2" {
-		t.Fatalf("itemsFor() panes = %q, %q", got[0].Where, got[1].Where)
-	}
-	if assigned := []string{got[0].Code, got[1].Code}; !reflect.DeepEqual(assigned, codes) {
-		t.Fatalf("itemsFor() codes = %+v", assigned)
-	}
 
-	single := itemsFor(found, codes, labels, false)
-	if single[0].Where != "" || single[1].Where != "" {
-		t.Fatal("a single-pane screen should not label rows with a pane")
+	got := itemsFor(found, codes)
+	want := []ui.Item{
+		{Code: "a", Text: "https://a.io/x", Row: 2},
+		{Code: "s", Text: "#232", Row: 5},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("itemsFor() = %+v, want %+v", got, want)
 	}
 }
 
@@ -138,33 +120,25 @@ func TestGrownBy(t *testing.T) {
 	}
 }
 
-func TestPaneIDs(t *testing.T) {
-	t.Parallel()
-	got := paneIDs([]herdr.Pane{{ID: "w1:p1", Width: 206, Height: 59}, {ID: "w1:p2"}})
-	if want := []string{"w1:p1", "w1:p2"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("paneIDs() = %+v, want %+v", got, want)
-	}
-}
-
-func TestBadgesForGroupsByPane(t *testing.T) {
+// A badge keeps its link's place in screen order, so a code always marks
+// the same link.
+func TestBadgesForKeepsScreenOrder(t *testing.T) {
 	t.Parallel()
 	found := []links.Link{
-		{Row: 2, Col: 4, Before: 3, Text: "abcd", Pane: "w1:p1"},
-		{Row: 9, Col: 0, Text: "ab", Pane: "w1:p2"},
-		{Row: 3, Col: 7, Before: 1, Text: "abc", Pane: "w1:p1"},
+		{Row: 2, Col: 4, Before: 3, Text: "abcd"},
+		{Row: 9, Col: 0, Text: "ab"},
+		{Row: 3, Col: 7, Before: 1, Text: "abc"},
 	}
 	codes := []string{"a", "s", "d"}
 
-	all := badgesFor(found, codes, []int{0, 1, 2})
-	want := map[string][]overlay.Badge{
-		"w1:p1": {
-			{Row: 2, Col: 4, Before: 3, Width: 4, Code: "a"},
-			{Row: 3, Col: 7, Before: 1, Width: 3, Code: "d"},
-		},
-		"w1:p2": {{Row: 9, Col: 0, Width: 2, Code: "s"}},
+	got := badgesFor(found, codes, []int{0, 1, 2})
+	want := []overlay.Badge{
+		{Row: 2, Col: 4, Before: 3, Width: 4, Code: "a"},
+		{Row: 9, Col: 0, Width: 2, Code: "s"},
+		{Row: 3, Col: 7, Before: 1, Width: 3, Code: "d"},
 	}
-	if !reflect.DeepEqual(all, want) {
-		t.Fatalf("badgesFor() = %+v, want %+v", all, want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("badgesFor() = %+v, want %+v", got, want)
 	}
 }
 
@@ -172,17 +146,17 @@ func TestBadgesForGroupsByPane(t *testing.T) {
 func TestBadgesForFadesTheRestWhenNarrowing(t *testing.T) {
 	t.Parallel()
 	found := []links.Link{
-		{Row: 2, Col: 4, Text: "ab", Pane: "w1:p1"},
-		{Row: 9, Col: 0, Text: "ab", Pane: "w1:p1"},
+		{Row: 2, Col: 4, Text: "ab"},
+		{Row: 9, Col: 0, Text: "ab"},
 	}
 	got := badgesFor(found, []string{"a", "s"}, []int{1})
-	if len(got["w1:p1"]) != 2 {
+	if len(got) != 2 {
 		t.Fatalf("badgesFor() = %+v, want both links kept", got)
 	}
-	if !got["w1:p1"][0].Dim {
+	if !got[0].Dim {
 		t.Fatal("the ruled-out hint should be dimmed")
 	}
-	if got["w1:p1"][1].Dim {
+	if got[1].Dim {
 		t.Fatal("the matching hint should stay bright")
 	}
 }

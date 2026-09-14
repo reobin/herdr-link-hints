@@ -26,7 +26,6 @@ type Link struct {
 	Kind Kind
 	Row  int // 0-based viewport row
 	Col  int // 0-based display column, not a byte offset
-	Pane string
 	// Before counts the blank cells left of the link, which is the room a
 	// hint has beside it.
 	Before int

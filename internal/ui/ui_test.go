@@ -171,14 +171,14 @@ func TestRenderTruncatesToTheScreen(t *testing.T) {
 	}
 }
 
-func TestRenderShowsPaneNames(t *testing.T) {
+func TestRenderShowsTheRow(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
-	list := []Item{{Code: "a", Text: "https://x.io", Where: "neon", Row: 4}}
-	term.render(list, indices(list), "", Options{Title: "2 panes", Alphabet: "asdfghjkl"})
+	list := []Item{{Code: "a", Text: "https://x.io", Row: 4}}
+	term.render(list, indices(list), "", Options{Title: "pane neon", Alphabet: "asdfghjkl"})
 	term.Flush()
-	if !strings.Contains(out.String(), "[neon r5]") {
-		t.Fatalf("expected the pane name and 1-based row, got:\n%s", out.String())
+	if !strings.Contains(out.String(), "[r5]") {
+		t.Fatalf("expected the 1-based row, got:\n%s", out.String())
 	}
 }
 
