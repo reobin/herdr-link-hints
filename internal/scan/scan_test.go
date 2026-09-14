@@ -259,15 +259,64 @@ func TestLinksLeavesAShortLineAlone(t *testing.T) {
 	}
 }
 
-func TestLinksCompletesURLWrappedAfterADot(t *testing.T) {
+// A trailing dot at the edge is a guess about prose versus URL, and the
+// joined text built from that guess must not confirm it.
+func TestLinksLeavesAWrappedDotAlone(t *testing.T) {
 	t.Parallel()
 	visible := []string{"see https://docs.a.io/guide/v2.", "1/install here"}
 	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
 	scanner := newScanner(source)
 	scanner.SkipObserve = true
 	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
-	if len(got) != 1 || got[0].URL != "https://docs.a.io/guide/v2.1/install" {
+	if len(got) != 1 || got[0].URL != "https://docs.a.io/guide/v2" {
 		t.Fatalf("Links() = %+v", got)
+	}
+}
+
+// The dot guard is per carry: a structural wrap on another line still
+// completes from the joined text.
+func TestLinksGuardsOnlyTheDotGuess(t *testing.T) {
+	t.Parallel()
+	visible := []string{
+		"go visit! https://a.io/long-ur",
+		"l-continued here",
+		"see now! https://docs.a.io/v2.",
+		"1/install here",
+	}
+	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
+	scanner := newScanner(source)
+	scanner.SkipObserve = true
+	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
+	var urls []string
+	for _, l := range got {
+		urls = append(urls, l.URL)
+	}
+	want := []string{"https://a.io/long-url-continued", "https://docs.a.io/v2"}
+	if !reflect.DeepEqual(urls, want) {
+		t.Fatalf("Links() = %+v, want %+v", urls, want)
+	}
+}
+
+// A short dot line never joined by unwrap must not nuke a structural
+// completion sharing its prefix, and the dot itself still stays Clean.
+func TestLinksShortDotKeepsStructuralCompletion(t *testing.T) {
+	t.Parallel()
+	visible := []string{
+		"hi https://a.io/v2.",
+		"go https://a.io/v2.1-long-ur",
+		"l-continued here",
+	}
+	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
+	scanner := newScanner(source)
+	scanner.SkipObserve = true
+	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[1]), Rows: 24}})
+	var urls []string
+	for _, l := range got {
+		urls = append(urls, l.URL)
+	}
+	want := []string{"https://a.io/v2", "https://a.io/v2.1-long-url-continued"}
+	if !reflect.DeepEqual(urls, want) {
+		t.Fatalf("Links() = %+v, want %+v", urls, want)
 	}
 }
 

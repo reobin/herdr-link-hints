@@ -92,6 +92,12 @@ func TestFromLines(t *testing.T) {
 				{Match: "https://b.io/y", Row: 1, Col: 18},
 			},
 		},
+		{
+			name:  "trailing dot never completes from known",
+			lines: []string{"see https://docs.a.io/guide/v2.", "1/install here"},
+			known: map[string]bool{"https://docs.a.io/guide/v2.1/install": true},
+			want:  []Visible{{Match: "https://docs.a.io/guide/v2", Row: 0, Col: 4}},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
