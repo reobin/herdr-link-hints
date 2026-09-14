@@ -36,8 +36,8 @@ prefix has ruled them all out.
 
 The hints are drawn with Herdr's pane graphics, which need a terminal
 with Kitty graphics support, and in the colours the terminal reports for
-itself. Without Kitty graphics the plugin reports `no layer` and quits:
-there is nothing to draw on.
+itself. Without Kitty graphics there are no badges to draw on, so the
+picker falls back to a code list.
 
 ## From source
 

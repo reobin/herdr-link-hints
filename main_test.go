@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
 	"github.com/reobin/herdr-link-hints/internal/overlay"
+	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
 // Every debug line carries how long the process has been running, so the
@@ -95,6 +97,36 @@ func TestItemsFor(t *testing.T) {
 	got := itemsFor(found, codes)
 	if assigned := []string{got[0].Code, got[1].Code}; !reflect.DeepEqual(assigned, codes) {
 		t.Fatalf("itemsFor() codes = %+v", assigned)
+	}
+}
+
+// Without a graphics layer the pick continues as a code list: no badge
+// redraws are wired, and nothing exits.
+func TestNarrowOptsFallsBackToListWithoutALayer(t *testing.T) {
+	t.Parallel()
+	log := slog.New(slog.DiscardHandler)
+	found := []links.Link{{Pane: "w1:p1", Row: 1, Col: 2, Text: "ab"}}
+	codes := []string{"a"}
+	ctx := context.Background()
+
+	if opts := narrowOpts(ctx, nil, found, codes); opts.OnNarrow != nil {
+		t.Fatal("nil marker should leave OnNarrow unset so the pick continues as a list")
+	}
+	dead := newMarker(nil, log, theme.Colors{},
+		[]herdr.Pane{{ID: "w1:p1", Width: 80, Height: 24}},
+		map[string]herdr.Scroll{}, map[string]herdr.Graphics{})
+	if opts := narrowOpts(ctx, dead, found, codes); opts.OnNarrow != nil {
+		t.Fatal("dead marker should leave OnNarrow unset so the pick continues as a list")
+	}
+	live := newMarker(nil, log, theme.Colors{},
+		[]herdr.Pane{{ID: "w1:p1", Width: 80, Height: 24}},
+		map[string]herdr.Scroll{},
+		map[string]herdr.Graphics{"w1:p1": {CellWidthPx: 9, CellHeightPx: 19, PaneVisible: true}})
+	if !live.live() {
+		t.Fatal("want a live marker for the control case")
+	}
+	if opts := narrowOpts(ctx, live, found, codes); opts.OnNarrow == nil {
+		t.Fatal("live marker should redraw badges on narrow")
 	}
 }
 
