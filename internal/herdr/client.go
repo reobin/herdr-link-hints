@@ -1,7 +1,9 @@
 // Package herdr talks to a running Herdr server over the control socket,
-// falling back to the CLI for pane inspection until socket parity is
-// proven. ObserveOSC8 stays on the CLI: no live OSC 8 sample exists to
-// prove a socket snapshot carries the same targets at the same cells.
+// dialling fresh for each call: the server closes the connection after
+// each response. It falls back to the CLI for pane inspection until
+// socket parity is proven. ObserveOSC8 stays on the CLI: no live OSC 8
+// sample exists to prove a socket snapshot carries the same targets at
+// the same cells.
 package herdr
 
 import (
@@ -9,13 +11,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -25,17 +25,14 @@ const (
 	SourceUnwrapped = "recent-unwrapped"
 )
 
-// Client holds the socket connection between calls so one invocation dials
-// once no matter how many panes it reads. It starts nothing that outlives
-// it; pane inspection that cannot go over the socket falls back to the CLI.
+// Client dials Herdr's control socket fresh for each call. It starts
+// nothing that outlives it; pane inspection that cannot go over the
+// socket falls back to the CLI.
 type Client struct {
 	bin        string
 	socket     string
 	cmdTimeout time.Duration
 	rpcTimeout time.Duration
-
-	mu   sync.Mutex
-	conn net.Conn
 }
 
 func New(opts ...Option) *Client {
