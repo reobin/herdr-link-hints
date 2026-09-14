@@ -92,7 +92,7 @@ func (t *Terminal) Theme() theme.Colors {
 		}
 		if key, rgb, ok := theme.Parse(reply); ok {
 			switch key {
-			case theme.KeyForeground, theme.KeyBackground, theme.KeyAccent:
+			case theme.KeyForeground, theme.KeyBackground, theme.KeyAccentRed, theme.KeyAccent, theme.KeyAccentBlue:
 				colors.Set(key, rgb)
 				seen[key] = true
 			}

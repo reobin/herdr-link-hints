@@ -26,7 +26,9 @@ func fullColors() Colors {
 	return Colors{
 		Foreground: color.RGBA{R: 0xCD, G: 0xD6, B: 0xF4, A: 0xFF},
 		Background: color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF},
+		AccentRed:  color.RGBA{R: 0xDC, G: 0x32, B: 0x2F, A: 0xFF},
 		Accent:     color.RGBA{R: 0xF9, G: 0xE2, B: 0xAF, A: 0xFF},
+		AccentBlue: color.RGBA{R: 0x26, G: 0x8B, B: 0xD2, A: 0xFF},
 	}
 }
 
@@ -79,6 +81,26 @@ func TestCacheRefusesNonOpaqueColours(t *testing.T) {
 	}
 	if _, ok := Load("ghostty"); ok {
 		t.Fatal("Load() hit on colours that were never opaque")
+	}
+}
+
+// A cache written before the red and blue accents existed misses, so the
+// next run re-probes live once instead of rendering with a stale palette.
+func TestCacheMissesBeforeAlternates(t *testing.T) {
+	withTempCache(t)
+	path, ok := cachePath("oldterm")
+	if !ok {
+		t.Fatal("cachePath() refused a plain program name")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"Foreground":{"R":205,"G":214,"B":244,"A":255},"Background":{"R":30,"G":30,"B":46,"A":255},"Accent":{"R":249,"G":226,"B":175,"A":255}}`
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Load("oldterm"); ok {
+		t.Fatal("Load() hit on a cache without the alternate accents")
 	}
 }
 
