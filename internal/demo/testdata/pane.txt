@@ -1,0 +1,24 @@
+$ herdr plugin install reobin/herdr-link-hints
+installed. reload the server to load it.
+$   https://a.io/quickstart - read this first
+wrote the quickstart in an afternoon.
+api docs moved last week.
+docs:     https://a.io/api reference
+232 closed yesterday.
+
+repro: open an empty pane, press the key.
+#232 fixes the empty-state crash
+232 is the same issue as above.
+
+merged the notes FF https://b.io/guide for details
+the guide covers install and keys.
+$ herdr server reload-config
+reloaded.
+
+examples live on the site.
+demo pane: six links          www.example.com and more
+more links below.
+$ open https://c.io/x
+opened in the browser.
+$       https://c.io/x is nearest the cursor
+$ 

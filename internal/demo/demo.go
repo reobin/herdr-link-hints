@@ -2,6 +2,8 @@
 package demo
 
 import (
+	"strings"
+
 	"github.com/reobin/herdr-link-hints/internal/cells"
 	"github.com/reobin/herdr-link-hints/internal/hints"
 	"github.com/reobin/herdr-link-hints/internal/links"
@@ -12,8 +14,8 @@ import (
 const (
 	Cols  = 80
 	Rows  = 24
-	CellW = 8
-	CellH = 16
+	CellW = 9
+	CellH = 18
 	Pane  = "demo"
 )
 
@@ -102,4 +104,43 @@ func Scenes() map[string]overlay.Scene {
 		"narrowed": SceneNarrowed(),
 		"typed":    SceneTyped(),
 	}
+}
+
+// PaneLines is the synthetic screen the demo badges sit on. Every link
+// text sits at its link's row and column, so a background rendered from
+// these lines lines up with the overlay frames.
+func PaneLines() []string {
+	lines := []string{
+		"$ herdr plugin install reobin/herdr-link-hints",
+		"installed. reload the server to load it.",
+		at(4, "https://a.io/quickstart", "$", " - read this first"),
+		"wrote the quickstart in an afternoon.",
+		"api docs moved last week.",
+		at(10, "https://a.io/api", "docs: ", " reference"),
+		"232 closed yesterday.",
+		"",
+		"repro: open an empty pane, press the key.",
+		at(0, "#232", "", " fixes the empty-state crash"),
+		"232 is the same issue as above.",
+		"",
+		at(20, "https://b.io/guide", "merged the notes FF", " for details"),
+		"the guide covers install and keys.",
+		"$ herdr server reload-config",
+		"reloaded.",
+		"",
+		"examples live on the site.",
+		at(30, "www.example.com", "demo pane: six links", " and more"),
+		"more links below.",
+		"$ open https://c.io/x",
+		"opened in the browser.",
+		at(8, "https://c.io/x", "$", " is nearest the cursor"),
+		"$ ",
+	}
+	out := make([]string, Rows)
+	copy(out, lines)
+	return out
+}
+
+func at(col int, text, prefix, suffix string) string {
+	return prefix + strings.Repeat(" ", col-cells.Width(prefix)) + text + suffix
 }

@@ -48,12 +48,18 @@ echo a | ./picker --demo
 vhs demo.tape
 ```
 
-`demo.gif` cycles the golden overlay states (full, narrowed, typed).
-Rebuild it from the goldens after any overlay change:
+`demo.gif` cycles the golden overlay states (full, narrowed, typed),
+composited over the synthetic pane text so it reads like a live session.
+Rebuild it after any overlay or demo change:
 
 ```sh
-ffmpeg -y -loop 1 -framerate 1 -t 1 -i internal/demo/testdata/golden/full.png -loop 1 -framerate 1 -t 1 -i internal/demo/testdata/golden/narrowed.png -loop 1 -framerate 1 -t 1 -i internal/demo/testdata/golden/typed.png -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0,scale=1280:768:flags=neighbor,format=rgb24,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" demo.gif
+./build-demo-gif.sh
 ```
+
+The script renders `internal/demo/testdata/pane.txt` with ImageMagick
+(`DEMO_FONT` overrides the typeface) and composites each golden frame
+over it. `pane.txt` is freshness-checked against `PaneLines()`, so the
+background can never drift from the badge coordinates.
 
 Refresh the goldens with `UPDATE_GOLDEN=1 go test ./internal/demo/`.
 `TestRenderBudget` fails the build when a full-screen render exceeds
