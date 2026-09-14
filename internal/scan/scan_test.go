@@ -22,7 +22,6 @@ type fakeSource struct {
 	mu       sync.Mutex
 	observed map[string]int
 	sizes    map[string][2]int
-	reads    map[string]int
 }
 
 func (f *fakeSource) PaneLines(_ context.Context, pane string) ([]string, error) {
@@ -31,10 +30,6 @@ func (f *fakeSource) PaneLines(_ context.Context, pane string) ([]string, error)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.reads == nil {
-		f.reads = map[string]int{}
-	}
-	f.reads[pane]++
 	return f.text[pane], nil
 }
 
@@ -62,12 +57,6 @@ func (f *fakeSource) observeCount(pane string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.observed[pane]
-}
-
-func (f *fakeSource) readCount(pane string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.reads[pane]
 }
 
 // panes sizes every pane the same: only the observe call cares, and the
