@@ -331,10 +331,19 @@ func glyphScale(cell Cell) int {
 
 func fill(img *image.Paletted, at image.Rectangle, index uint8) {
 	at = at.Intersect(img.Rect)
-	for y := at.Min.Y; y < at.Max.Y; y++ {
-		for x := at.Min.X; x < at.Max.X; x++ {
-			img.SetColorIndex(x, y, index)
-		}
+	if at.Empty() {
+		return
+	}
+	w := at.Dx()
+	x0 := at.Min.X - img.Rect.Min.X
+	off0 := (at.Min.Y-img.Rect.Min.Y)*img.Stride + x0
+	first := img.Pix[off0 : off0+w]
+	for i := range first {
+		first[i] = index
+	}
+	for y := at.Min.Y + 1; y < at.Max.Y; y++ {
+		off := (y-img.Rect.Min.Y)*img.Stride + x0
+		copy(img.Pix[off:off+w], first)
 	}
 }
 
