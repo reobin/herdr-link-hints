@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -60,12 +61,17 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	ctx, cancel := context.WithTimeout(ctx, c.rpcTimeout)
 	defer cancel()
 
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "unix", c.socket)
+	// One connection per client: requests serialize on the mutex, so a
+	// three-pane screen dials once instead of once per pane per redraw.
+	// A unix dial is cheap next to a process spawn; the win here is
+	// holding the connection, not dodging the handshake.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	conn, err := c.dialLocked(ctx)
 	if err != nil {
-		return fmt.Errorf("dial herdr socket %s: %w", c.socket, err)
+		return err
 	}
-	defer func() { _ = conn.Close() }()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}
@@ -73,10 +79,10 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	id := nextRequestID()
 	body, err := json.Marshal(rpcRequest{ID: id, Method: method, Params: params})
 	if err != nil {
-		return fmt.Errorf("encode %s request: %w", method, err)
+		return c.failLocked(fmt.Errorf("encode %s request: %w", method, err))
 	}
 	if _, err := conn.Write(append(body, '\n')); err != nil {
-		return fmt.Errorf("send %s request: %w", method, err)
+		return c.failLocked(fmt.Errorf("send %s request: %w", method, err))
 	}
 
 	// The socket also carries events and other clients' replies.
@@ -84,7 +90,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	for {
 		var response rpcResponse
 		if err := decoder.Decode(&response); err != nil {
-			return fmt.Errorf("read %s response: %w", method, err)
+			return c.failLocked(fmt.Errorf("read %s response: %w", method, err))
 		}
 		if response.ID != id {
 			continue
@@ -96,10 +102,34 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 			return nil
 		}
 		if err := json.Unmarshal(response.Result, result); err != nil {
-			return fmt.Errorf("parse %s result: %w", method, err)
+			return c.failLocked(fmt.Errorf("parse %s result: %w", method, err))
 		}
 		return nil
 	}
+}
+
+// dialLocked returns the shared connection, dialling it on first use. A
+// failed call drops it so the next call redials and the CLI fallback in
+// the caller still has a live server to talk to.
+func (c *Client) dialLocked(ctx context.Context) (net.Conn, error) {
+	if c.conn != nil {
+		return c.conn, nil
+	}
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "unix", c.socket)
+	if err != nil {
+		return nil, fmt.Errorf("dial herdr socket %s: %w", c.socket, err)
+	}
+	c.conn = conn
+	return conn, nil
+}
+
+func (c *Client) failLocked(err error) error {
+	if c.conn != nil {
+		_ = c.conn.Close()
+		c.conn = nil
+	}
+	return err
 }
 
 // Graphics reports what pane.graphics can do for a pane. A feature_disabled
@@ -116,6 +146,33 @@ func (c *Client) GraphicsInfo(ctx context.Context, pane string) (Graphics, error
 	var result Graphics
 	err := c.call(ctx, "pane.graphics.info", map[string]any{"pane_id": pane}, &result)
 	return result, err
+}
+
+// GraphicsInfos fetches every pane's graphics info concurrently and keeps
+// only the successes: the marker build runs alongside the link scan, so a
+// serial fetch would sit on the critical path once the scan stops
+// dominating it. A pane with no entry is one that cannot be drawn on.
+func (c *Client) GraphicsInfos(ctx context.Context, panes []string) map[string]Graphics {
+	infos := make(map[string]Graphics, len(panes))
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
+	for _, pane := range panes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			info, err := c.GraphicsInfo(ctx, pane)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			infos[pane] = info
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return infos
 }
 
 // Frame is one image placed over a pane's viewport cells.
