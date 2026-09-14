@@ -175,6 +175,49 @@ func TestMerge(t *testing.T) {
 		}
 	})
 
+	// One visual link seen before and after output arrived mid-scan is
+	// not two links: the stale replay yields to the snapshot placement
+	// next to it, whatever order the stream delivered them in.
+	t.Run("a stale replay beside a placed link is dropped", func(t *testing.T) {
+		t.Parallel()
+		lines := []string{
+			"Pushed. Now the PR description.",
+			"Edited PR #971",
+		}
+		hidden := []ansi.Link{
+			{URL: "https://g.io/pull/971", Row: 0, Col: 10, Label: "pull 971"},
+			{URL: "https://g.io/pull/971", Row: 1, Col: 10, Label: "#971"},
+		}
+		got := Merge(lines, nil, hidden)
+		if len(got) != 1 || got[0].Row != 1 || got[0].Col != 10 || got[0].Text != "#971" {
+			t.Fatalf("Merge() = %+v, want the single snapshot placement", got)
+		}
+	})
+
+	t.Run("a stale replay beside a visible link is dropped", func(t *testing.T) {
+		t.Parallel()
+		lines := []string{"", "", "", "", "", "see https://a.io/x here"}
+		visible := []Visible{{Match: "https://a.io/x", Row: 5, Col: 4}}
+		hidden := []ansi.Link{{URL: "https://a.io/x", Row: 4, Col: 4, Label: "the link"}}
+		got := Merge(lines, visible, hidden)
+		if len(got) != 1 || got[0].Kind != Text || got[0].Row != 5 {
+			t.Fatalf("Merge() = %+v, want the single visible link", got)
+		}
+	})
+
+	t.Run("a replay far from a placed link is kept", func(t *testing.T) {
+		t.Parallel()
+		lines := []string{"see #2 here", "", "", "", "", "", "", "", "", "", "nothing here"}
+		hidden := []ansi.Link{
+			{URL: "https://g.io/pull/2", Row: 0, Col: 4, Label: "#2"},
+			{URL: "https://g.io/pull/2", Row: 10, Col: 0, Label: "second"},
+		}
+		got := Merge(lines, nil, hidden)
+		if len(got) != 2 {
+			t.Fatalf("Merge() = %+v, want both placements", got)
+		}
+	})
+
 	t.Run("hidden link keeps its anchor text", func(t *testing.T) {
 		t.Parallel()
 		got := Merge(nil, nil, []ansi.Link{{URL: "https://github.com/o/r/pull/232", Row: 0, Col: 4, Label: "#232"}})
