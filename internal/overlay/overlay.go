@@ -54,7 +54,8 @@ func newPalette(c theme.Colors) color.Palette {
 
 // Badge is one hint code and the link it marks. Before is the blank cells
 // left of the link, Width the cells the link covers, Dim whether the typed
-// prefix has ruled it out.
+// prefix has ruled it out, Typed how many leading code runes are already
+// typed.
 type Badge struct {
 	Row    int
 	Col    int
@@ -62,6 +63,7 @@ type Badge struct {
 	Width  int
 	Code   string
 	Dim    bool
+	Typed  int
 }
 
 // Cell is the pixel size of a terminal cell, from pane.graphics.info.
@@ -158,6 +160,7 @@ type placement struct {
 	linkCol int
 	width   int
 	dim     bool
+	typed   int
 }
 
 type point struct {
@@ -193,6 +196,7 @@ func clip(badges []Badge, viewport Size) []placement {
 			linkCol: b.Col,
 			width:   min(max(b.Width, 1), viewport.Cols-b.Col),
 			dim:     b.Dim,
+			typed:   min(max(b.Typed, 0), len(code)),
 		})
 	}
 	return out
@@ -288,9 +292,20 @@ func underline(img *image.Paletted, p placement, cell Cell) {
 func drawBadge(img *image.Paletted, p placement, cell Cell) {
 	box := cellRect(p.row, p.col, len(p.code), 1, cell)
 	fill(img, box, badgeColor(p.dim, colorBackground, colorDimBackground))
+	// The typed prefix reads as already entered: its cells are inverted
+	// against the rest of the badge, reusing the badge's own colours so no
+	// new palette entry is needed.
+	for i := 0; i < p.typed; i++ {
+		fill(img, cellRect(p.row, p.col+i, 1, 1, cell),
+			badgeColor(p.dim, colorText, colorDimText))
+	}
 	outline(img, box, badgeColor(p.dim, colorBorder, colorDimBorder))
 	for i, r := range p.code {
-		drawGlyph(img, r, box.Min.X+i*cell.Width, box.Min.Y, cell, badgeColor(p.dim, colorText, colorDimText))
+		glyphColor := badgeColor(p.dim, colorText, colorDimText)
+		if i < p.typed {
+			glyphColor = badgeColor(p.dim, colorBackground, colorDimBackground)
+		}
+		drawGlyph(img, r, box.Min.X+i*cell.Width, box.Min.Y, cell, glyphColor)
 	}
 }
 
