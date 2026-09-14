@@ -18,6 +18,7 @@ import (
 
 	"github.com/reobin/herdr-link-hints/internal/browse"
 	"github.com/reobin/herdr-link-hints/internal/cells"
+	"github.com/reobin/herdr-link-hints/internal/demo"
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/hints"
 	"github.com/reobin/herdr-link-hints/internal/links"
@@ -52,6 +53,9 @@ func main() {
 func run(args []string) int {
 	if len(args) > 0 && args[0] == "--open" {
 		return open()
+	}
+	if len(args) > 0 && args[0] == "--demo" {
+		return runDemo()
 	}
 	return pick()
 }
@@ -144,6 +148,34 @@ func squareCols(cell herdr.Graphics) int {
 		return annotateRows * 2
 	}
 	return max(annotateRows*cell.CellHeightPx/cell.CellWidthPx, 1)
+}
+
+func runDemo() int {
+	log := newLogger()
+	term := ui.Open(os.Stdin, os.Stdout)
+	defer term.Close()
+
+	found := demo.Ranked()
+	codes := demo.Codes()
+	opts := ui.Options{Alphabet: hints.DefaultAlphabet}
+	opts.OnNarrow = func(matches []int, typed string) {
+		_, err := overlay.Render(overlay.Scene{
+			Badges:   demo.Badges(matches, typed),
+			Colors:   demo.Colors(),
+			Cell:     demo.Cell(),
+			Viewport: demo.Viewport(),
+		})
+		if err != nil {
+			log.Debug("demo render failed", "error", err)
+		}
+	}
+
+	index, picked := ui.Pick(term, itemsFor(found, codes), opts)
+	if !picked {
+		return exitCancelled
+	}
+	term.Printf("\nOpened %s in demo.\n", found[index].URL)
+	return exitOK
 }
 
 func pick() int {

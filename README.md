@@ -34,6 +34,31 @@ unambiguous. Backspace edits, Enter opens a single match, Esc quits.
 A small popup shows how many hints are left, and says `no match` when a
 prefix has ruled them all out.
 
+![demo](demo.gif)
+
+## Demo
+
+`picker --demo` runs the picker over a fixed synthetic pane with no
+Herdr connection, so screenshots, recordings, and regression tests are
+deterministic:
+
+```sh
+go build -trimpath -o picker .
+echo a | ./picker --demo
+vhs demo.tape
+```
+
+`demo.gif` cycles the golden overlay states (full, narrowed, typed).
+Rebuild it from the goldens after any overlay change:
+
+```sh
+ffmpeg -y -loop 1 -framerate 1 -t 1 -i internal/demo/testdata/golden/full.png -loop 1 -framerate 1 -t 1 -i internal/demo/testdata/golden/narrowed.png -loop 1 -framerate 1 -t 1 -i internal/demo/testdata/golden/typed.png -filter_complex "[0:v][1:v][2:v]concat=n=3:v=1:a=0,scale=1280:768:flags=neighbor,format=rgb24,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" demo.gif
+```
+
+Refresh the goldens with `UPDATE_GOLDEN=1 go test ./internal/demo/`.
+`TestRenderBudget` fails the build when a full-screen render exceeds
+2s; `go test -bench . ./...` tracks render speed.
+
 The hints are drawn with Herdr's pane graphics, which need a terminal
 with Kitty graphics support, and in the colours the terminal reports for
 itself. Without Kitty graphics there are no badges to draw on, so the
@@ -47,3 +72,13 @@ Needs Go 1.24+.
 go build -trimpath -o picker .
 herdr plugin link /path/to/herdr-link-hints
 ```
+
+## Settings
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `HINTS_WIDTH` | square of the cell | picker popup width |
+| `HINTS_HEIGHT` | 5 | picker popup height |
+| `HINTS_PLACEMENT` | popup | picker pane placement; only popup takes a size |
+| `HINTS_NO_OBSERVE` | unset | skip the observe stream when set |
+| `HINTS_DEBUG` | unset | log to stderr, or to the named file |
