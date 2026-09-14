@@ -165,7 +165,9 @@ type point struct {
 	col int
 }
 
-// clip places each badge and drops one the viewport cannot hold.
+// clip places each badge and drops one the viewport cannot hold. A placed
+// badge joins the cells the next one prefers to avoid, which thins
+// collisions; place still covers a taken cell as a last resort.
 func clip(badges []Badge, viewport Size) []placement {
 	taken := linkCells(badges, viewport)
 	var out []placement
@@ -182,6 +184,7 @@ func clip(badges []Badge, viewport Size) []placement {
 		if col < 0 || col+len(code) > viewport.Cols {
 			continue
 		}
+		occupy(taken, point{row, col}, len(code))
 		out = append(out, placement{
 			row:     row,
 			col:     col,
@@ -236,6 +239,12 @@ func place(b Badge, width int, viewport Size, taken map[point]bool) (row, col in
 // fit slides a badge left so its whole code stays inside the pane.
 func fit(col, width, cols int) int {
 	return max(0, min(col, cols-width))
+}
+
+func occupy(taken map[point]bool, at point, width int) {
+	for col := at.col; col < at.col+width; col++ {
+		taken[point{at.row, col}] = true
+	}
 }
 
 func free(taken map[point]bool, at point, width int) bool {
