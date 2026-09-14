@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"time"
 
 	"github.com/reobin/herdr-link-hints/internal/ansi"
@@ -26,11 +27,13 @@ const (
 
 // ObserveOSC8 is the only way to see a link whose URL never appears as
 // text: snapshots strip OSC 8 targets. The stream is closed before return.
-func (c *Client) ObserveOSC8(ctx context.Context, pane string) ([]ansi.Link, error) {
+// Unsized, Herdr renders the stream into a frame of its own default shape,
+// which wraps the output elsewhere and moves every link.
+func (c *Client) ObserveOSC8(ctx context.Context, pane string, cols, rows int) ([]ansi.Link, error) {
 	ctx, cancel := context.WithTimeout(ctx, observeLimit)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, c.bin, "terminal", "session", "observe", pane)
+	cmd := exec.CommandContext(ctx, c.bin, observeArgs(pane, cols, rows)...)
 	cmd.Stdin = nil
 	cmd.Stderr = nil
 	cmd.WaitDelay = time.Second
@@ -68,6 +71,14 @@ func (c *Client) ObserveOSC8(ctx context.Context, pane string) ([]ansi.Link, err
 			return ansi.ParseLinks(stream), nil
 		}
 	}
+}
+
+func observeArgs(pane string, cols, rows int) []string {
+	args := []string{"terminal", "session", "observe", pane}
+	if cols > 0 && rows > 0 {
+		args = append(args, "--cols", strconv.Itoa(cols), "--rows", strconv.Itoa(rows))
+	}
+	return args
 }
 
 func readFrames(ctx context.Context, r io.Reader, out chan<- []byte) {

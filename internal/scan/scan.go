@@ -18,7 +18,16 @@ const scrollbackLines = 200
 // Source is the slice of Herdr that scanning needs.
 type Source interface {
 	PaneLines(ctx context.Context, pane, source string, lines int) ([]string, error)
-	ObserveOSC8(ctx context.Context, pane string) ([]ansi.Link, error)
+	ObserveOSC8(ctx context.Context, pane string, cols, rows int) ([]ansi.Link, error)
+}
+
+// Pane is a pane to scan and the size its content is laid out in, which is
+// what the observe stream must be rendered at for its coordinates to mean
+// anything.
+type Pane struct {
+	ID   string
+	Cols int
+	Rows int
 }
 
 // Scanner logs a failed read rather than failing the scan.
@@ -29,7 +38,7 @@ type Scanner struct {
 }
 
 // Links keeps the given pane order, so hint codes stay predictable.
-func (s *Scanner) Links(ctx context.Context, panes []string) []links.Link {
+func (s *Scanner) Links(ctx context.Context, panes []Pane) []links.Link {
 	perPane := make([][]links.Link, len(panes))
 	var wg sync.WaitGroup
 	for i, pane := range panes {
@@ -48,7 +57,7 @@ func (s *Scanner) Links(ctx context.Context, panes []string) []links.Link {
 	return all
 }
 
-func (s *Scanner) paneLinks(ctx context.Context, pane string) []links.Link {
+func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
 	var (
 		visible []string
 		hidden  []ansi.Link
@@ -57,16 +66,16 @@ func (s *Scanner) paneLinks(ctx context.Context, pane string) []links.Link {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		visible = s.read(ctx, pane, herdr.SourceVisible, 0)
+		visible = s.read(ctx, pane.ID, herdr.SourceVisible, 0)
 	}()
 	go func() {
 		defer wg.Done()
 		if s.SkipObserve {
 			return
 		}
-		found, err := s.Source.ObserveOSC8(ctx, pane)
+		found, err := s.Source.ObserveOSC8(ctx, pane.ID, pane.Cols, pane.Rows)
 		if err != nil {
-			s.Log.Debug("observe failed", "pane", pane, "error", err)
+			s.Log.Debug("observe failed", "pane", pane.ID, "error", err)
 			return
 		}
 		hidden = found
@@ -79,11 +88,11 @@ func (s *Scanner) paneLinks(ctx context.Context, pane string) []links.Link {
 	// Scrollback is fetched only for a wrapped URL.
 	var known map[string]bool
 	if needsUnwrapped(visible) {
-		known = links.Known(strings.Join(s.read(ctx, pane, herdr.SourceUnwrapped, scrollbackLines), "\n"))
+		known = links.Known(strings.Join(s.read(ctx, pane.ID, herdr.SourceUnwrapped, scrollbackLines), "\n"))
 	}
 	found := links.Merge(visible, links.FromLines(visible, known), hidden)
 	for i := range found {
-		found[i].Pane = pane
+		found[i].Pane = pane.ID
 	}
 	return found
 }
