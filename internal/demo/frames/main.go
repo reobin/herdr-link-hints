@@ -46,7 +46,8 @@ func run(out string, cell overlay.Cell) error {
 
 func env() string {
 	colors := demo.Colors()
-	return fmt.Sprintf("COLS=%d\nROWS=%d\nBG=%s\nFG=%s\n", demo.Cols, demo.Rows, hex(colors.Background), hex(colors.Foreground))
+	return fmt.Sprintf("COLS=%d\nROWS=%d\nBG=%s\nFG=%s\nCODE0=%s\nURL0=%s\n",
+		demo.Cols, demo.Rows, hex(colors.Background), hex(colors.Foreground), demo.Codes()[0], demo.Ranked()[0].URL)
 }
 
 func hex(c color.RGBA) string {

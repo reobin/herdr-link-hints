@@ -72,15 +72,15 @@ func all() []int {
 	return out
 }
 
-func scene(badges []overlay.Badge) overlay.Scene {
+func Scene(badges []overlay.Badge) overlay.Scene {
 	return overlay.Scene{Badges: badges, Colors: Colors(), Cell: Cell(), Viewport: Viewport()}
 }
 
-func SceneFull() overlay.Scene { return scene(Badges(all(), "")) }
+func SceneFull() overlay.Scene { return Scene(Badges(all(), "")) }
 
-func SceneNarrowed() overlay.Scene { return scene(Badges([]int{0}, Codes()[0])) }
+func SceneNarrowed() overlay.Scene { return Scene(Badges([]int{0}, Codes()[0])) }
 
-func SceneTyped() overlay.Scene { return scene(Badges(all(), Codes()[0])) }
+func SceneTyped() overlay.Scene { return Scene(Badges(all(), Codes()[0])) }
 
 func Scenes() map[string]overlay.Scene {
 	return map[string]overlay.Scene{

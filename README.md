@@ -39,8 +39,8 @@ prefix has ruled them all out.
 ## Demo
 
 `picker --demo` runs the picker over a fixed synthetic pane with no
-Herdr connection, so screenshots, recordings, and regression tests are
-deterministic:
+Herdr connection. It renders the hint frames without showing them, so it
+exercises the whole pick path from any terminal:
 
 ```sh
 go build -trimpath -o picker .
@@ -88,4 +88,5 @@ herdr plugin link /path/to/herdr-link-hints
 | `HINTS_HEIGHT` | 5 | picker popup height |
 | `HINTS_PLACEMENT` | popup | picker pane placement; only popup takes a size |
 | `HINTS_NO_OBSERVE` | unset | skip the observe stream when set |
+| `HINTS_NO_THEME_CACHE` | unset | skip the theme cache and probe the terminal live |
 | `HINTS_DEBUG` | unset | log to stderr, or to the named file |

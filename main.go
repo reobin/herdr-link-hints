@@ -150,26 +150,25 @@ func squareCols(cell herdr.Graphics) int {
 }
 
 func runDemo() int {
-	log := newLogger()
 	term := ui.Open(os.Stdin, os.Stdout)
 	defer term.Close()
 
 	found := demo.Ranked()
 	codes := demo.Codes()
+	var renderErr error
 	opts := ui.Options{Alphabet: hints.DefaultAlphabet}
 	opts.OnNarrow = func(matches []int, typed string) {
-		_, err := overlay.Render(overlay.Scene{
-			Badges:   demo.Badges(matches, typed),
-			Colors:   demo.Colors(),
-			Cell:     demo.Cell(),
-			Viewport: demo.Viewport(),
-		})
-		if err != nil {
-			log.Debug("demo render failed", "error", err)
+		badges := hints.Badges(found, codes, matches, typed)[demo.Pane]
+		if _, err := overlay.Render(demo.Scene(badges)); err != nil {
+			renderErr = err
 		}
 	}
 
 	index, picked := ui.Pick(term, itemsFor(found, codes), opts)
+	if renderErr != nil {
+		term.Printf("\ndemo render failed: %v\n", renderErr)
+		return exitFailed
+	}
 	if !picked {
 		return exitCancelled
 	}

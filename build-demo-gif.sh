@@ -23,7 +23,7 @@ POINT=30
 BASELINE=28
 
 # The frames command writes the hint layers and demo.env, which carries
-# COLS, ROWS, BG and FG from the Go side.
+# COLS, ROWS, BG, FG, and the first code and URL from the Go side.
 go run ./internal/demo/frames -out "$WORK" -cell-width "$CELL_W" -cell-height "$CELL_H"
 mv "$WORK/full.png" "$WORK/hints-full.png"
 mv "$WORK/narrowed.png" "$WORK/hints-narrowed.png"
@@ -168,7 +168,7 @@ frame() {
 T_KEY1=30      # prefix+f keycap pops
 T_HINTS=36     # hints ease in
 T_KEY1_OUT=62  # keycap fades
-T_KEY2=84      # a keycap pops
+T_KEY2=84      # code keycap pops
 T_NARROW=90    # hints narrow to the match
 T_OPEN=110     # everything clears, the pick opens
 T_CAP_OUT=168  # closing caption fades so the loop lands on frame 0
@@ -220,7 +220,7 @@ render() {
 				key_alpha=$(fade_out "$n" "$T_KEY1_OUT" "$D_FADE")
 			fi
 		elif [ "$n" -ge "$T_KEY2" ]; then
-			key=a
+			key=code
 			key_alpha=$(fade_in "$n" "$T_KEY2" "$D_POP")
 			key_scale=$(lerp 0.88 1 "$key_alpha")
 			if [ "$n" -ge "$T_OPEN" ]; then
@@ -252,11 +252,11 @@ pane_text
 cursor
 window
 keycap prefix "prefix + f"
-keycap a "a"
+keycap code "$CODE0"
 caption links "six links on screen"
 caption hints "every link gets a hint code, the rest dims"
 caption typed "type the code"
-caption opened "opened https://c.io/x"
+caption opened "opened $URL0"
 render
 
 ffmpeg -y -v error -framerate "$FPS" -i "$WORK/seq/f%04d.png" \

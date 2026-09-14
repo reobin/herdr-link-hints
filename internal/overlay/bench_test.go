@@ -3,12 +3,12 @@ package overlay
 import (
 	"testing"
 	"time"
-
-	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
 const renderBudget = 2 * time.Second * budgetFactor
 
+// fullScreenScene is the worst case a real pane can produce: a badge every
+// six columns on every row of a large viewport with tall cells.
 func fullScreenScene() Scene {
 	viewport := Size{Cols: 204, Rows: 57}
 	var badges []Badge
@@ -17,12 +17,13 @@ func fullScreenScene() Scene {
 			badges = append(badges, Badge{Row: row, Col: col, Width: 4, Code: "as"})
 		}
 	}
-	return Scene{Badges: badges, Colors: theme.Fallback(), Cell: Cell{Width: 19, Height: 54}, Viewport: viewport}
+	full := scene(badges, viewport)
+	full.Cell = Cell{Width: 19, Height: 54}
+	return full
 }
 
 func BenchmarkRenderFullScreen(b *testing.B) {
 	scene := fullScreenScene()
-	b.ResetTimer()
 	for b.Loop() {
 		if _, err := Render(scene); err != nil {
 			b.Fatal(err)
@@ -30,8 +31,8 @@ func BenchmarkRenderFullScreen(b *testing.B) {
 	}
 }
 
+// Wall-clock, so it runs alone rather than racing the parallel tests.
 func TestRenderBudget(t *testing.T) {
-	t.Parallel()
 	start := time.Now()
 	if _, err := Render(fullScreenScene()); err != nil {
 		t.Fatal(err)
