@@ -194,7 +194,9 @@ const maxAnchorHits = 8
 // Merge places a hidden link by searching the visible text for its anchor:
 // the observe stream is a repaint of its own, so it can be staler than the
 // snapshot and its coordinates are the last resort. Every occurrence is
-// marked.
+// marked. A last-resort placement yields to a snapshot-placed link for the
+// same target on a neighbouring cell: that pair is one visual link seen
+// before and after output arrived mid-scan, not two links.
 func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 	var out []Link
 	taken := map[cell]bool{}
@@ -207,11 +209,13 @@ func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 		link.Before = blanksBefore(lines, link.Row, link.Col)
 		out = append(out, link)
 	}
+	var fallback []ansi.Link
 	for _, h := range hidden {
 		anchor := anchorText(h)
 		at := anchorCells(lines, anchor)
 		if len(at) == 0 {
-			at = []cell{{h.Row, h.Col}}
+			fallback = append(fallback, h)
+			continue
 		}
 		for _, c := range at {
 			add(Link{URL: h.URL, Text: anchor, Kind: OSC8, Row: c.row, Col: c.col})
@@ -220,7 +224,35 @@ func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 	for _, v := range visible {
 		add(Link{URL: Normalize(v.Match), Text: v.Match, Kind: Text, Row: v.Row, Col: v.Col})
 	}
+	for _, h := range fallback {
+		if shadowed(out, h) {
+			continue
+		}
+		add(Link{URL: h.URL, Text: anchorText(h), Kind: OSC8, Row: h.Row, Col: h.Col})
+	}
 	return out
+}
+
+// shadowed reports whether the snapshot already placed the same target on
+// a neighbouring cell: the fallback coordinates are then stale output,
+// not a second link.
+func shadowed(placed []Link, h ansi.Link) bool {
+	for _, link := range placed {
+		if Normalize(link.URL) != Normalize(h.URL) {
+			continue
+		}
+		if abs(link.Row-h.Row) <= 1 && abs(link.Col-h.Col) <= 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 func anchorCells(lines []string, anchor string) []cell {
