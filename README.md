@@ -34,7 +34,7 @@ unambiguous. Backspace edits, Enter opens a single match, Esc quits.
 A small popup shows how many hints are left, and says `no match` when a
 prefix has ruled them all out.
 
-![demo](demo.gif)
+![demo](docs/demo.gif)
 
 ## Demo
 
@@ -47,13 +47,13 @@ go build -trimpath -o picker .
 echo a | ./picker --demo
 ```
 
-`demo.gif` plays a synthetic session: the pane at rest, a keypress,
+`docs/demo.gif` plays a synthetic session: the pane at rest, a keypress,
 hints easing in over the dimmed text, the typed code narrowing them to
 one, the pick opening. Rebuild it after any
 overlay or demo change:
 
 ```sh
-./build-demo-gif.sh
+./scripts/build-demo-gif.sh
 ```
 
 Every layer is drawn at the gif's own resolution. `pane.txt` is set with

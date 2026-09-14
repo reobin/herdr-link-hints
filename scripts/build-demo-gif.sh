@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuilds demo.gif: a terminal window showing the synthetic demo pane, a
+# Rebuilds docs/demo.gif: a terminal window showing the synthetic demo pane, a
 # keypress, hints easing in over the dimmed text, the typed code narrowing
 # them to one, and the pick opening. Every layer
 # is rendered at the gif's own resolution, so nothing is upscaled: the
@@ -8,6 +8,9 @@
 # PaneLines(), so the background can never drift from the badge
 # coordinates.
 set -euo pipefail
+
+# The layer paths below are repo-relative, so the script runs from anywhere.
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 FONT="${DEMO_FONT:-$HOME/Library/Fonts/JetBrainsMono-Regular.ttf}"
 PANE=internal/demo/testdata/pane.txt
@@ -261,4 +264,4 @@ render
 
 ffmpeg -y -v error -framerate "$FPS" -i "$WORK/seq/f%04d.png" \
 	-filter_complex "format=rgb24,split[s0][s1];[s0]palettegen=max_colors=256:stats_mode=diff[p];[s1][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle" \
-	-loop 0 demo.gif
+	-loop 0 docs/demo.gif

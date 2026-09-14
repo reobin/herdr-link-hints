@@ -1,5 +1,5 @@
 // Command frames writes the demo overlay scenes as PNGs at a chosen cell
-// size, so build-demo-gif.sh can composite them at the gif's resolution
+// size, so scripts/build-demo-gif.sh can composite them at the gif's resolution
 // instead of upscaling the test goldens. It also writes demo.env, the
 // pane geometry and palette as shell assignments, so the script carries
 // no copy of the Go constants.
