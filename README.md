@@ -48,8 +48,8 @@ echo a | ./picker --demo
 vhs demo.tape
 ```
 
-`demo.gif` cycles the golden overlay states (full, narrowed, typed),
-composited over the synthetic pane text so it reads like a live session.
+`demo.gif` plays a synthetic session: plain pane output, a keypress,
+hints fading in over dimmed text, narrowing to one match, opening it.
 Rebuild it after any overlay or demo change:
 
 ```sh
