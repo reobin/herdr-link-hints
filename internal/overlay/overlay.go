@@ -38,16 +38,19 @@ const scrimAlpha = 0x66
 // dimAlpha is how far a ruled-out hint fades.
 const dimAlpha = 0xB0
 
-// newPalette derives every colour from the ones the terminal reported.
+// newPalette derives every colour from the ones the terminal reported. The
+// badge takes the palette entry with the most contrast against the
+// background, so it survives light themes where yellow alone is a smudge.
 func newPalette(c theme.Colors) color.Palette {
+	accent, _ := theme.BestAccent(c)
 	palette := make(color.Palette, colorDimText+1)
 	palette[colorHole] = color.RGBA{}
 	palette[colorScrim] = theme.Fade(c.Background, scrimAlpha)
-	palette[colorBorder] = theme.Mix(c.Accent, c.Background, 0.45)
-	palette[colorBackground] = c.Accent
+	palette[colorBorder] = theme.Mix(accent, c.Background, 0.45)
+	palette[colorBackground] = accent
 	palette[colorText] = c.Background
-	palette[colorDimBorder] = theme.Fade(theme.Mix(c.Accent, c.Background, 0.65), dimAlpha)
-	palette[colorDimBackground] = theme.Fade(theme.Mix(c.Accent, c.Background, 0.55), dimAlpha)
+	palette[colorDimBorder] = theme.Fade(theme.Mix(accent, c.Background, 0.65), dimAlpha)
+	palette[colorDimBackground] = theme.Fade(theme.Mix(accent, c.Background, 0.55), dimAlpha)
 	palette[colorDimText] = theme.Fade(c.Background, dimAlpha)
 	return palette
 }
