@@ -9,13 +9,12 @@ import (
 
 	"github.com/reobin/herdr-link-hints/internal/ansi"
 	"github.com/reobin/herdr-link-hints/internal/cells"
-	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
 )
 
 // Source is the slice of Herdr that scanning needs.
 type Source interface {
-	PaneLines(ctx context.Context, pane, source string, lines int) ([]string, error)
+	PaneLines(ctx context.Context, pane string) ([]string, error)
 	ObserveOSC8(ctx context.Context, pane string, cols, rows int) ([]ansi.Link, error)
 }
 
@@ -64,7 +63,7 @@ func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		visible = s.read(ctx, pane.ID, herdr.SourceVisible, 0)
+		visible = s.read(ctx, pane.ID)
 	}()
 	go func() {
 		defer wg.Done()
@@ -194,10 +193,10 @@ func needsUnwrapped(visible []string) bool {
 	return len(carries(visible)) > 0
 }
 
-func (s *Scanner) read(ctx context.Context, pane, source string, lines int) []string {
-	text, err := s.Source.PaneLines(ctx, pane, source, lines)
+func (s *Scanner) read(ctx context.Context, pane string) []string {
+	text, err := s.Source.PaneLines(ctx, pane)
 	if err != nil {
-		s.Log.Debug("pane read failed", "pane", pane, "source", source, "error", err)
+		s.Log.Debug("pane read failed", "pane", pane, "error", err)
 	}
 	return text
 }
@@ -230,7 +229,7 @@ func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row
 		return shifted, choice.Col, true
 	}
 
-	visible := s.read(ctx, choice.Pane, herdr.SourceVisible, 0)
+	visible := s.read(ctx, choice.Pane)
 	// The same anchor can sit in several places, so the cell the hint was
 	// drawn on beats the first match anywhere.
 	if stillThere(visible, choice, shifted) {

@@ -94,7 +94,7 @@ func TestPaneLinesOverSocket(t *testing.T) {
 		})}
 	})
 
-	got, err := New(WithSocket(socket)).PaneLines(context.Background(), "w1:p1", SourceVisible, 0)
+	got, err := New(WithSocket(socket)).PaneLines(context.Background(), "w1:p1")
 	if err != nil {
 		t.Fatalf("PaneLines: %v", err)
 	}
@@ -112,29 +112,6 @@ func TestPaneLinesOverSocket(t *testing.T) {
 	}
 	if _, ok := params["lines"]; ok {
 		t.Fatalf("params = %+v, want no lines when the extent is left to Herdr", params)
-	}
-}
-
-func TestPaneLinesMapsSourceAndLines(t *testing.T) {
-	t.Parallel()
-	requests := make(chan map[string]any, 1)
-	socket := fakeServer(t, func(request map[string]any) [][]byte {
-		requests <- request
-		return [][]byte{mustJSON(t, map[string]any{
-			"id":     request["id"],
-			"result": map[string]any{"type": "pane_read", "read": map[string]any{"text": "a"}},
-		})}
-	})
-
-	if _, err := New(WithSocket(socket)).PaneLines(context.Background(), "w1:p1", SourceUnwrapped, 10); err != nil {
-		t.Fatalf("PaneLines: %v", err)
-	}
-	params, _ := (<-requests)["params"].(map[string]any)
-	if params["source"] != "recent_unwrapped" {
-		t.Fatalf("source = %v, want the socket enum spelling", params["source"])
-	}
-	if params["lines"] != float64(10) {
-		t.Fatalf("lines = %v, want 10", params["lines"])
 	}
 }
 
@@ -223,7 +200,7 @@ func TestSocketFallsBackToCLI(t *testing.T) {
 	} else if want := []Pane{{ID: "w1:p9"}}; !reflect.DeepEqual(panes, want) {
 		t.Fatalf("ScreenPanes() = %+v, want %+v", panes, want)
 	}
-	if _, err := client.PaneLines(context.Background(), "w1:p9", SourceVisible, 0); err == nil {
+	if _, err := client.PaneLines(context.Background(), "w1:p9"); err == nil {
 		t.Fatal("expected an error when both paths fail")
 	}
 	if labels, err := client.PaneLabels(context.Background(), []string{"w1:p9"}); err == nil {
