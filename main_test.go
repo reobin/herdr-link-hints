@@ -152,7 +152,7 @@ func TestBadgesForGroupsByPane(t *testing.T) {
 	}
 	codes := []string{"a", "s", "d"}
 
-	all := badgesFor(found, codes, []int{0, 1, 2})
+	all := badgesFor(found, codes, []int{0, 1, 2}, "")
 	want := map[string][]overlay.Badge{
 		"w1:p1": {
 			{Row: 2, Col: 4, Before: 3, Width: 4, Code: "a"},
@@ -172,7 +172,7 @@ func TestBadgesForFadesTheRestWhenNarrowing(t *testing.T) {
 		{Row: 2, Col: 4, Text: "ab", Pane: "w1:p1"},
 		{Row: 9, Col: 0, Text: "ab", Pane: "w1:p1"},
 	}
-	got := badgesFor(found, []string{"a", "s"}, []int{1})
+	got := badgesFor(found, []string{"a", "s"}, []int{1}, "")
 	if len(got["w1:p1"]) != 2 {
 		t.Fatalf("badgesFor() = %+v, want both links kept", got)
 	}
@@ -181,6 +181,45 @@ func TestBadgesForFadesTheRestWhenNarrowing(t *testing.T) {
 	}
 	if got["w1:p1"][1].Dim {
 		t.Fatal("the matching hint should stay bright")
+	}
+}
+
+// Narrowing marks the typed prefix on each badge, so the screen shows what
+// the readout echoed. A ruled-out badge claims only the runes it shares.
+func TestBadgesForMarksTheTypedPrefix(t *testing.T) {
+	t.Parallel()
+	found := []links.Link{
+		{Row: 2, Col: 4, Text: "ab", Pane: "w1:p1"},
+		{Row: 9, Col: 0, Text: "ab", Pane: "w1:p1"},
+	}
+	got := badgesFor(found, []string{"ad", "as"}, []int{1}, "as")
+	if got["w1:p1"][0].Typed != 1 {
+		t.Fatalf("badgesFor() ruled-out Typed = %d, want 1", got["w1:p1"][0].Typed)
+	}
+	if got["w1:p1"][1].Typed != 2 {
+		t.Fatalf("badgesFor() matching Typed = %d, want 2", got["w1:p1"][1].Typed)
+	}
+	if got["w1:p1"][0].Dim == got["w1:p1"][1].Dim {
+		t.Fatal("badgesFor() should still dim the ruled-out hint")
+	}
+}
+
+func TestCommonPrefix(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		code, typed string
+		want        int
+	}{
+		{"as", "", 0},
+		{"as", "a", 1},
+		{"as", "as", 2},
+		{"as", "asd", 2},
+		{"ad", "as", 1},
+		{"sd", "as", 0},
+	} {
+		if got := commonPrefix(tc.code, tc.typed); got != tc.want {
+			t.Fatalf("commonPrefix(%q, %q) = %d, want %d", tc.code, tc.typed, got, tc.want)
+		}
 	}
 }
 
