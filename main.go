@@ -181,10 +181,28 @@ func pick() int {
 	for _, pane := range scanInput {
 		cursors[pane.ID] = pane.Rows - 1
 	}
-	found := hints.Rank(scanner.Links(ctx, scanInput), focused, cursors)
+	// The graphics infos ride alongside the scan: a serial fetch would sit
+	// on the critical path once the scan stops dominating it.
+	var (
+		infos   map[string]herdr.Graphics
+		scanned []links.Link
+		wg      sync.WaitGroup
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		infos = client.GraphicsInfos(ctx, ids)
+	}()
+	go func() {
+		defer wg.Done()
+		scanned = scanner.Links(ctx, scanInput)
+	}()
+	wg.Wait()
 	scanning()
 
-	marks := newMarker(ctx, client, log, term.Theme(), panes, scrolls)
+	found := hints.Rank(scanned, focused, cursors)
+
+	marks := newMarker(client, log, term.Theme(), panes, scrolls, infos)
 	// A layer Herdr has accepted outlives the process that set it.
 	defer marks.clear(context.WithoutCancel(ctx))
 	if len(found) == 0 {

@@ -25,13 +25,15 @@ type paneView struct {
 	size overlay.Size
 }
 
-// newMarker keeps only the panes that can be drawn on.
-func newMarker(ctx context.Context, client *herdr.Client, log *slog.Logger, colors theme.Colors, panes []herdr.Pane, scrolls map[string]herdr.Scroll) *marker {
+// newMarker keeps only the panes that can be drawn on. The graphics infos
+// arrive pre-fetched: pick() gathers them alongside the link scan, so the
+// marker build never serialises a round trip per pane.
+func newMarker(client *herdr.Client, log *slog.Logger, colors theme.Colors, panes []herdr.Pane, scrolls map[string]herdr.Scroll, infos map[string]herdr.Graphics) *marker {
 	views := make(map[string]paneView, len(panes))
 	for _, pane := range panes {
-		info, err := client.GraphicsInfo(ctx, pane.ID)
-		if err != nil {
-			log.Debug("graphics info failed", "pane", pane.ID, "error", err)
+		info, ok := infos[pane.ID]
+		if !ok {
+			log.Debug("graphics info missing", "pane", pane.ID)
 			continue
 		}
 		if !info.PaneVisible || info.CellWidthPx <= 0 || info.CellHeightPx <= 0 {

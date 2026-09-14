@@ -1,5 +1,7 @@
-// Package herdr talks to a running Herdr server: pane inspection through
-// the CLI, link activation over the control socket.
+// Package herdr talks to a running Herdr server over the control socket,
+// falling back to the CLI for pane inspection until socket parity is
+// proven. ObserveOSC8 stays on the CLI: no live OSC 8 sample exists to
+// prove a socket snapshot carries the same targets at the same cells.
 package herdr
 
 import (
@@ -7,11 +9,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,12 +25,17 @@ const (
 	SourceUnwrapped = "recent-unwrapped"
 )
 
-// Client holds no state between calls and starts nothing that outlives it.
+// Client holds the socket connection between calls so one invocation dials
+// once no matter how many panes it reads. It starts nothing that outlives
+// it; pane inspection that cannot go over the socket falls back to the CLI.
 type Client struct {
 	bin        string
 	socket     string
 	cmdTimeout time.Duration
 	rpcTimeout time.Duration
+
+	mu   sync.Mutex
+	conn net.Conn
 }
 
 func New(opts ...Option) *Client {
@@ -58,8 +67,12 @@ func defaultSocket() string {
 }
 
 // PaneLines reads a pane's text. A lines count of zero leaves the extent
-// to Herdr.
+// to Herdr. It goes over the socket and falls back to the CLI until socket
+// parity is proven.
 func (c *Client) PaneLines(ctx context.Context, pane, source string, lines int) ([]string, error) {
+	if text, err := c.paneLinesSocket(ctx, pane, source, lines); err == nil {
+		return text, nil
+	}
 	args := []string{"pane", "read", pane, "--source", source}
 	if lines > 0 {
 		args = append(args, "--lines", strconv.Itoa(lines))
@@ -71,6 +84,31 @@ func (c *Client) PaneLines(ctx context.Context, pane, source string, lines int) 
 	return strings.Split(string(out), "\n"), nil
 }
 
+func (c *Client) paneLinesSocket(ctx context.Context, pane, source string, lines int) ([]string, error) {
+	params := map[string]any{"pane_id": pane, "source": socketSource(source), "format": "text"}
+	if lines > 0 {
+		params["lines"] = lines
+	}
+	var result struct {
+		Read struct {
+			Text string `json:"text"`
+		} `json:"read"`
+	}
+	if err := c.call(ctx, "pane.read", params, &result); err != nil {
+		return nil, err
+	}
+	return strings.Split(result.Read.Text, "\n"), nil
+}
+
+// socketSource maps CLI source names onto the socket enum, which spells
+// recent-unwrapped with an underscore.
+func socketSource(source string) string {
+	if source == SourceUnwrapped {
+		return "recent_unwrapped"
+	}
+	return source
+}
+
 // Pane is a pane on screen. Width and Height are its outer rect in cells,
 // border included.
 type Pane struct {
@@ -80,8 +118,12 @@ type Pane struct {
 }
 
 // ScreenPanes lists the panes sharing a screen with the given one, and
-// falls back to that pane alone when the layout cannot be read.
+// falls back to that pane alone when the layout cannot be read. It goes
+// over the socket and falls back to the CLI until socket parity is proven.
 func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]Pane, error) {
+	if panes, err := c.screenPanesSocket(ctx, pane); err == nil {
+		return panes, nil
+	}
 	out, err := c.run(ctx, "pane", "layout", "--pane", pane)
 	if err != nil {
 		return []Pane{{ID: pane}}, err
@@ -89,44 +131,92 @@ func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]Pane, error) {
 	return parseScreenPanes(out, pane)
 }
 
-func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
-	var payload struct {
-		Result struct {
-			Layout struct {
-				Panes []struct {
-					PaneID string `json:"pane_id"`
-					Rect   struct {
-						Width  int `json:"width"`
-						Height int `json:"height"`
-					} `json:"rect"`
-				} `json:"panes"`
-			} `json:"layout"`
-		} `json:"result"`
+func (c *Client) screenPanesSocket(ctx context.Context, pane string) ([]Pane, error) {
+	var result struct {
+		Layout layoutResult `json:"layout"`
 	}
-	if err := json.Unmarshal(out, &payload); err != nil {
-		return []Pane{{ID: fallback}}, fmt.Errorf("parse pane layout: %w", err)
+	if err := c.call(ctx, "pane.layout", map[string]any{"pane_id": pane}, &result); err != nil {
+		return nil, err
 	}
+	return panesFromLayout(result.Layout, pane), nil
+}
+
+// layoutResult is the layout object both the CLI envelope and the socket
+// result carry.
+type layoutResult struct {
+	Panes []layoutPane `json:"panes"`
+}
+
+type layoutPane struct {
+	PaneID string `json:"pane_id"`
+	Rect   struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	} `json:"rect"`
+}
+
+func panesFromLayout(layout layoutResult, fallback string) []Pane {
 	var panes []Pane
-	for _, p := range payload.Result.Layout.Panes {
+	for _, p := range layout.Panes {
 		if p.PaneID != "" {
 			panes = append(panes, Pane{ID: p.PaneID, Width: p.Rect.Width, Height: p.Rect.Height})
 		}
 	}
 	if len(panes) == 0 {
-		return []Pane{{ID: fallback}}, nil
+		return []Pane{{ID: fallback}}
 	}
-	return panes, nil
+	return panes
+}
+
+func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
+	var payload struct {
+		Result struct {
+			Layout layoutResult `json:"layout"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return []Pane{{ID: fallback}}, fmt.Errorf("parse pane layout: %w", err)
+	}
+	return panesFromLayout(payload.Result.Layout, fallback), nil
 }
 
 // PaneLabels gives every requested pane an entry, falling back to the tail
-// of its ID.
+// of its ID. It goes over the socket and falls back to the CLI until socket
+// parity is proven.
 func (c *Client) PaneLabels(ctx context.Context, panes []string) (map[string]string, error) {
 	labels := defaultLabels(panes)
+	if listed, err := c.paneLabelsSocket(ctx, labels); err == nil {
+		return listed, nil
+	}
 	out, err := c.run(ctx, "pane", "list")
 	if err != nil {
 		return labels, err
 	}
 	return parsePaneLabels(out, labels)
+}
+
+func (c *Client) paneLabelsSocket(ctx context.Context, labels map[string]string) (map[string]string, error) {
+	var result struct {
+		Panes []labelPane `json:"panes"`
+	}
+	if err := c.call(ctx, "pane.list", map[string]any{}, &result); err != nil {
+		return nil, err
+	}
+	fillLabels(labels, result.Panes)
+	return labels, nil
+}
+
+type labelPane struct {
+	PaneID string `json:"pane_id"`
+	Label  string `json:"label"`
+}
+
+func fillLabels(labels map[string]string, panes []labelPane) {
+	for _, info := range panes {
+		if _, wanted := labels[info.PaneID]; wanted && info.Label != "" {
+			labels[info.PaneID] = info.Label
+		}
+	}
 }
 
 func defaultLabels(panes []string) map[string]string {
@@ -140,20 +230,13 @@ func defaultLabels(panes []string) map[string]string {
 func parsePaneLabels(out []byte, labels map[string]string) (map[string]string, error) {
 	var payload struct {
 		Result struct {
-			Panes []struct {
-				PaneID string `json:"pane_id"`
-				Label  string `json:"label"`
-			} `json:"panes"`
+			Panes []labelPane `json:"panes"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
 		return labels, fmt.Errorf("parse pane list: %w", err)
 	}
-	for _, info := range payload.Result.Panes {
-		if _, wanted := labels[info.PaneID]; wanted && info.Label != "" {
-			labels[info.PaneID] = info.Label
-		}
-	}
+	fillLabels(labels, payload.Result.Panes)
 	return labels, nil
 }
 
@@ -172,6 +255,9 @@ type Scroll struct {
 }
 
 func (c *Client) PaneScroll(ctx context.Context, pane string) (Scroll, error) {
+	if scroll, err := c.paneScrollSocket(ctx, pane); err == nil {
+		return scroll, nil
+	}
 	out, err := c.run(ctx, "pane", "get", pane)
 	if err != nil {
 		return Scroll{}, err
@@ -179,14 +265,28 @@ func (c *Client) PaneScroll(ctx context.Context, pane string) (Scroll, error) {
 	return parsePaneScroll(out)
 }
 
+func (c *Client) paneScrollSocket(ctx context.Context, pane string) (Scroll, error) {
+	var result struct {
+		Pane struct {
+			Scroll scrollState `json:"scroll"`
+		} `json:"pane"`
+	}
+	if err := c.call(ctx, "pane.get", map[string]any{"pane_id": pane}, &result); err != nil {
+		return Scroll{}, err
+	}
+	return Scroll{Offset: result.Pane.Scroll.MaxOffsetFromBottom, ViewportRows: result.Pane.Scroll.ViewportRows}, nil
+}
+
+type scrollState struct {
+	MaxOffsetFromBottom int `json:"max_offset_from_bottom"`
+	ViewportRows        int `json:"viewport_rows"`
+}
+
 func parsePaneScroll(out []byte) (Scroll, error) {
 	var payload struct {
 		Result struct {
 			Pane struct {
-				Scroll struct {
-					MaxOffsetFromBottom int `json:"max_offset_from_bottom"`
-					ViewportRows        int `json:"viewport_rows"`
-				} `json:"scroll"`
+				Scroll scrollState `json:"scroll"`
 			} `json:"pane"`
 		} `json:"result"`
 	}
