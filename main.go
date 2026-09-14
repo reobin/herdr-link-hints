@@ -7,9 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -71,8 +74,8 @@ func open() int {
 	}
 
 	client := herdr.New()
-	mode := pickMode(ctx, client, focused, log)
-	open := paneFor(mode)
+	mode, cell := pickMode(ctx, client, focused, log)
+	open := paneFor(mode, cell)
 	pane, err := client.OpenPane(ctx, open)
 	if err != nil {
 		log.Debug("open picker pane failed", "placement", open.Placement, "error", err)
@@ -85,7 +88,7 @@ func open() int {
 
 // paneFor picks the placement. Only a popup can be sized, and only a popup
 // floats rather than reflowing the pane the hints are drawn on.
-func paneFor(mode string) herdr.PaneOpen {
+func paneFor(mode string, cell herdr.Graphics) herdr.PaneOpen {
 	open := herdr.PaneOpen{
 		Plugin:     pluginID,
 		Entrypoint: entrypoint,
@@ -93,18 +96,24 @@ func paneFor(mode string) herdr.PaneOpen {
 		Focus:      true,
 		Env:        map[string]string{envMode: mode},
 	}
+	// The pane is a separate process, so debugging it needs the setting
+	// carried across.
+	if debug := os.Getenv("HINTS_DEBUG"); debug != "" {
+		open.Env["HINTS_DEBUG"] = debug
+	}
 	if open.Placement == "popup" {
-		open.Width, open.Height = paneShape(mode)
+		open.Width, open.Height = paneShape(mode, cell)
 	}
 	return open
 }
 
 // pickMode falls back to the list when there are no graphics to draw on.
-func pickMode(ctx context.Context, client *herdr.Client, pane string, log *slog.Logger) string {
+// The cell size comes back with it, because that is what squares the popup.
+func pickMode(ctx context.Context, client *herdr.Client, pane string, log *slog.Logger) (string, herdr.Graphics) {
 	info, err := client.GraphicsInfo(ctx, pane)
 	if err != nil {
 		log.Debug("graphics unavailable", "pane", pane, "error", err)
-		return modeList
+		return modeList, info
 	}
 	log.Debug("graphics",
 		"pane", pane,
@@ -113,20 +122,32 @@ func pickMode(ctx context.Context, client *herdr.Client, pane string, log *slog.
 		"pane_visible", info.PaneVisible,
 		"max_layers_per_pane", info.MaxLayers)
 	if !info.PaneVisible || info.CellWidthPx <= 0 || info.CellHeightPx <= 0 {
-		return modeList
+		return modeList, info
 	}
-	return modeAnnotate
+	return modeAnnotate, info
 }
 
-// paneShape sizes the annotate popup for three rows of content. Herdr
-// floors the outer height at four, and 2, 3 and 4 all give two content
-// rows, which cannot centre a line.
-func paneShape(mode string) (width, height string) {
+// annotateRows is the outer height of the annotate popup. Herdr takes a
+// border off each side, and four gives two content rows, which cannot
+// centre a line; five gives three.
+const annotateRows = 5
+
+// paneShape keeps the annotate popup square on screen. Cells are far taller
+// than they are wide, so squareness is a pixel measure, not a cell count.
+func paneShape(mode string, cell herdr.Graphics) (width, height string) {
 	width, height = "80%", "60%"
 	if mode == modeAnnotate {
-		width, height = "22", "5"
+		width, height = strconv.Itoa(squareCols(cell)), strconv.Itoa(annotateRows)
 	}
 	return envOr("HINTS_WIDTH", width), envOr("HINTS_HEIGHT", height)
+}
+
+// The fallback is a typical 2:1 cell, for a terminal that reported nothing.
+func squareCols(cell herdr.Graphics) int {
+	if cell.CellWidthPx <= 0 || cell.CellHeightPx <= 0 {
+		return annotateRows * 2
+	}
+	return max(annotateRows*cell.CellHeightPx/cell.CellWidthPx, 1)
 }
 
 func pick() int {
@@ -141,7 +162,7 @@ func pick() int {
 
 	focused := focusedPane()
 	if focused == "" {
-		term.Pause("no pane to hint")
+		term.Pause("no pane")
 		return exitCancelled
 	}
 
@@ -188,18 +209,18 @@ func pick() int {
 	}
 	if len(found) == 0 {
 		// The backdrop still goes up, so an empty screen reads as an answer.
-		if marks != nil {
+		if marks.live() {
 			marks.draw(ctx, nil)
 		}
-		term.Pause("no links on screen")
+		term.Pause("no links")
 		return exitCancelled
 	}
 
 	codes := hints.Codes(len(found), hints.DefaultAlphabet)
 	opts := ui.Options{Title: title, Alphabet: hints.DefaultAlphabet}
 	if marks != nil {
-		if len(marks.views) == 0 {
-			term.Pause("nothing to draw on")
+		if !marks.live() {
+			term.Pause("no layer")
 			return exitFailed
 		}
 		opts.Style = ui.StyleStatus
@@ -216,8 +237,13 @@ func pick() int {
 
 	row, col, located := scanner.Locate(ctx, choice, grownBy(ctx, client, choice.Pane, scrolls, log))
 	if !located {
-		term.Pause("scrolled off screen")
+		term.Pause("scrolled")
 		return exitFailed
+	}
+	// The pick is settled, so the screen comes back before the link opens
+	// rather than after.
+	if marks != nil {
+		marks.clear(ctx)
 	}
 
 	url, handled := activate(ctx, client, choice, row, col, log)
@@ -227,7 +253,7 @@ func pick() int {
 	}
 	if err := browse.Open(url); err != nil {
 		log.Debug("browser open failed", "url", url, "error", err)
-		term.Pause("could not open it")
+		term.Pause("failed")
 		return exitFailed
 	}
 	term.Printf("\nOpened %s in browser.\n", url)
@@ -258,11 +284,21 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// newLogger writes to HINTS_DEBUG when it names a file. The annotate pane is
+// a few cells wide, so stderr there cannot be read.
 func newLogger() *slog.Logger {
-	if os.Getenv("HINTS_DEBUG") == "" {
+	target := os.Getenv("HINTS_DEBUG")
+	if target == "" {
 		return slog.New(slog.DiscardHandler)
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	out := io.Writer(os.Stderr)
+	if strings.ContainsRune(target, os.PathSeparator) {
+		file, err := os.OpenFile(target, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err == nil {
+			out = file
+		}
+	}
+	return slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
 func paneIDs(panes []herdr.Pane) []string {

@@ -182,75 +182,71 @@ func TestRenderShowsPaneNames(t *testing.T) {
 	}
 }
 
-// The annotate popup holds nothing but this line, so it is centred on what
-// the reader sees and on the rows the pane actually got.
-func TestRenderStatusCentresTheCount(t *testing.T) {
+// The whole readout is this one box: the keys typed, then what still
+// matches. Nothing else on screen repeats it.
+func TestRenderStatusShowsTypedAndCount(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name      string
-		rows      int
-		wantBlank int
-	}{
-		{"one row has nowhere to centre", 1, 0},
-		{"an even pane leans up", 2, 0},
-		{"an odd pane centres", 3, 1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			term, out := keyTerminal(t, nil)
-			term.rows = tc.rows
-			list := items("aa", "as", "ad")
-			term.render(list, indices(list)[:2], "a", Options{Alphabet: "asdfghjkl", Style: StyleStatus})
-			term.Flush()
+	list := items("aa", "as", "ad")
+	opts := Options{Alphabet: "asdfghjkl", Style: StyleStatus}
 
-			shown := status(2)
-			drawn := strings.TrimPrefix(out.String(), "\x1b[2J\x1b[H")
-			if blank := strings.Count(drawn, "\r\n"); blank != tc.wantBlank {
-				t.Fatalf("status sits under %d blank rows, want %d: %q", blank, tc.wantBlank, drawn)
-			}
-			if !strings.HasSuffix(drawn, shown.String()) {
-				t.Fatalf("the status should count the matches, got:\n%q", drawn)
-			}
-			drawn = strings.TrimLeft(drawn, "\r\n")
-			lead := len(drawn) - len(strings.TrimLeft(drawn, " "))
-			if want := centrePad(fallbackCols, shown.width()); lead != want {
-				t.Fatalf("status starts at column %d, want %d", lead, want)
-			}
-		})
+	term, out := keyTerminal(t, nil)
+	term.render(list, indices(list)[:2], "a", opts)
+	term.Flush()
+	rows := drawnRows(out.String())
+	if len(rows) != 2 {
+		t.Fatalf("want the echo and the count on their own rows, got %q", rows)
+	}
+	if rows[0] != "a" {
+		t.Fatalf("first row = %q, want the typed prefix", rows[0])
+	}
+	if rows[1] != "2 links" {
+		t.Fatalf("second row = %q, want the match count", rows[1])
+	}
+
+	// Before the first keystroke the echo row is blank, and the count has
+	// not moved.
+	term, out = keyTerminal(t, nil)
+	term.render(list, indices(list), "", opts)
+	term.Flush()
+	if rows := drawnRows(out.String()); len(rows) != 1 || rows[0] != "3 links" {
+		t.Fatalf("untyped pane = %q, want the count alone", rows)
+	}
+	if before, after := countRow(out.String()), countRow(typedOut(t, list, opts)); before != after {
+		t.Fatalf("the count moved from row %d to %d when typing started", before, after)
 	}
 }
 
-func TestStatus(t *testing.T) {
+func TestRenderStatusSaysWhenNothingMatches(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		matches int
-		want    string
-	}{{0, "no match"}, {1, "1 link"}, {12, "12 links"}}
-	for _, tc := range cases {
-		got := status(tc.matches)
-		if plain(got) != tc.want {
-			t.Fatalf("status(%d) = %q, want %q", tc.matches, plain(got), tc.want)
-		}
-		if got.width() != len(tc.want) {
-			t.Fatalf("status(%d) is %d wide, want %d", tc.matches, got.width(), len(tc.want))
-		}
-	}
-	// The count carries the weight and its unit recedes.
-	if counted := status(12); counted[0].sgr == counted[1].sgr {
-		t.Fatalf("status() = %+v, want the count and its unit styled apart", counted)
-	}
-	if status(0)[0].sgr == status(12)[0].sgr {
-		t.Fatal("a ruled-out prefix should not look like a count")
+	term, out := keyTerminal(t, nil)
+	list := items("aa", "as")
+	term.render(list, nil, "z", Options{Alphabet: "asdfghjkl", Style: StyleStatus})
+	term.Flush()
+	if rows := drawnRows(out.String()); rows[1] != "no match" {
+		t.Fatalf("second row = %q, want no match", rows[1])
 	}
 }
 
-func plain(l line) string {
+func drawnRows(out string) []string {
+	var rows []string
+	for _, row := range strings.Split(strings.TrimPrefix(out, "\x1b[2J\x1b[H"), "\r\n") {
+		if trimmed := strings.TrimSpace(stripSGR(row)); trimmed != "" {
+			rows = append(rows, trimmed)
+		}
+	}
+	return rows
+}
+
+func stripSGR(s string) string {
 	var b strings.Builder
-	for _, s := range l {
-		b.WriteString(s.text)
+	for {
+		before, rest, found := strings.Cut(s, "\x1b[")
+		b.WriteString(before)
+		if !found {
+			return b.String()
+		}
+		_, s, _ = strings.Cut(rest, "m")
 	}
-	return b.String()
 }
 
 // A pane nothing is typed into should not show a cursor waiting for input.
@@ -269,8 +265,9 @@ func TestOpenHidesTheCursor(t *testing.T) {
 	}
 }
 
-// OnNarrow has to fire once before the first keystroke and again on every
-// change.
+// OnNarrow fires once before the first keystroke and again on every change,
+// but not for the keystroke that resolves the pick: that frame would be torn
+// down before it could be read.
 func TestPickReportsEachNarrowing(t *testing.T) {
 	t.Parallel()
 	var typed []string
@@ -286,10 +283,10 @@ func TestPickReportsEachNarrowing(t *testing.T) {
 	if _, ok := Pick(term, items("aa", "as", "ad", "sa", "ss"), opts); !ok {
 		t.Fatal("Pick() did not select")
 	}
-	if want := []string{"", "s", "sa"}; !slices.Equal(typed, want) {
+	if want := []string{"", "s"}; !slices.Equal(typed, want) {
 		t.Fatalf("OnNarrow saw %q, want %q", typed, want)
 	}
-	if want := []int{5, 2, 1}; !slices.Equal(counts, want) {
+	if want := []int{5, 2}; !slices.Equal(counts, want) {
 		t.Fatalf("OnNarrow saw match counts %v, want %v", counts, want)
 	}
 }
@@ -405,6 +402,70 @@ func TestReadKeySwallowsALateColorReply(t *testing.T) {
 		term, _ := keyTerminal(t, []byte(sequence))
 		if got := term.readKey(); got.kind != keyUnknown {
 			t.Errorf("ReadKey(%q) = %+v, want keyUnknown", sequence, got)
+		}
+	}
+}
+
+// The annotate pane is a few cells wide, so the label goes rather than
+// being cut in half.
+func TestSpinnerTextDropsALabelThatCannotFit(t *testing.T) {
+	t.Parallel()
+	term, _ := keyTerminal(t, nil)
+
+	term.cols = 40
+	if got := term.spinnerText(0, "scanning"); got != spinnerFrames[0]+" scanning" {
+		t.Fatalf("spinnerText() = %q, want the label kept", got)
+	}
+	term.cols = 3
+	if got := term.spinnerText(0, "scanning"); got != spinnerFrames[0] {
+		t.Fatalf("spinnerText() = %q, want the spinner alone", got)
+	}
+}
+
+func typedOut(t *testing.T, list []Item, opts Options) string {
+	t.Helper()
+	term, out := keyTerminal(t, nil)
+	term.render(list, indices(list)[:2], "a", opts)
+	term.Flush()
+	return out.String()
+}
+
+func countRow(out string) int {
+	for i, row := range strings.Split(strings.TrimPrefix(out, "\x1b[2J\x1b[H"), "\r\n") {
+		if strings.Contains(stripSGR(row), "link") {
+			return i
+		}
+	}
+	return -1
+}
+
+// The wider gap falls on the right, so the left edge stays put.
+func TestCentrePadRoundsUp(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ width, text, want int }{
+		{10, 7, 2}, // odd leftover: two left, one right
+		{9, 7, 1},  // even leftover: symmetric
+		{4, 8, 0},  // wider than the pane
+	}
+	for _, tc := range cases {
+		if got := centrePad(tc.width, tc.text); got != tc.want {
+			t.Fatalf("centrePad(%d, %d) = %d, want %d", tc.width, tc.text, got, tc.want)
+		}
+	}
+}
+
+// The count is the line the eye goes to, so it takes the middle row and the
+// echo sits above it.
+func TestStatusPutsTheCountOnTheMiddleRow(t *testing.T) {
+	t.Parallel()
+	for _, rows := range []int{3, 5, 7} {
+		term, out := keyTerminal(t, nil)
+		term.rows = rows
+		list := items("aa", "as", "ad")
+		term.render(list, indices(list), "", Options{Alphabet: "asdfghjkl", Style: StyleStatus})
+		term.Flush()
+		if got, want := countRow(out.String()), rows/2; got != want {
+			t.Fatalf("in %d rows the count is on row %d, want the middle row %d", rows, got, want)
 		}
 	}
 }

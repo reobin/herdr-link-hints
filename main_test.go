@@ -211,16 +211,26 @@ func TestContentStripsThePaneBorder(t *testing.T) {
 	}
 }
 
+// retinaCell is the shape this was measured against: cells twice as tall
+// as they are wide.
+var retinaCell = herdr.Graphics{CellWidthPx: 19, CellHeightPx: 42}
+
 // Not parallel: these cases set environment variables.
 func TestPaneShape(t *testing.T) {
-	t.Run("annotate gets one line of status", func(t *testing.T) {
-		width, height := paneShape(modeAnnotate)
-		if width != "22" || height != "5" {
+	t.Run("annotate is square in pixels, not in cells", func(t *testing.T) {
+		width, height := paneShape(modeAnnotate, retinaCell)
+		if width != "11" || height != "5" {
+			t.Fatalf("paneShape(%q) = %q, %q", modeAnnotate, width, height)
+		}
+	})
+	t.Run("a terminal that reported no cell size still gets a shape", func(t *testing.T) {
+		width, height := paneShape(modeAnnotate, herdr.Graphics{})
+		if width != "10" || height != "5" {
 			t.Fatalf("paneShape(%q) = %q, %q", modeAnnotate, width, height)
 		}
 	})
 	t.Run("the list fallback keeps room for a list", func(t *testing.T) {
-		width, height := paneShape(modeList)
+		width, height := paneShape(modeList, retinaCell)
 		if width != "80%" || height != "60%" {
 			t.Fatalf("paneShape(%q) = %q, %q", modeList, width, height)
 		}
@@ -228,23 +238,36 @@ func TestPaneShape(t *testing.T) {
 	t.Run("the environment overrides both", func(t *testing.T) {
 		t.Setenv("HINTS_WIDTH", "40")
 		t.Setenv("HINTS_HEIGHT", "10")
-		width, height := paneShape(modeAnnotate)
+		width, height := paneShape(modeAnnotate, retinaCell)
 		if width != "40" || height != "10" {
 			t.Fatalf("paneShape(%q) = %q, %q", modeAnnotate, width, height)
 		}
 	})
 }
 
+// A box that is square in cells is twice as tall as it is wide on screen.
+func TestSquareColsTracksTheCellAspect(t *testing.T) {
+	t.Parallel()
+	for _, cell := range []herdr.Graphics{retinaCell, {CellWidthPx: 9, CellHeightPx: 19}} {
+		cols := squareCols(cell)
+		wide := cols * cell.CellWidthPx
+		tall := annotateRows * cell.CellHeightPx
+		if off := max(wide, tall) - min(wide, tall); off > cell.CellWidthPx {
+			t.Fatalf("cell %+v: %dx%d px is not square within a cell", cell, wide, tall)
+		}
+	}
+}
+
 // Not parallel: these cases set environment variables.
 func TestPaneFor(t *testing.T) {
-	t.Run("annotate gets a popup sized for one line", func(t *testing.T) {
-		got := paneFor(modeAnnotate)
-		if got.Placement != "popup" || got.Width != "22" || got.Height != "5" {
+	t.Run("annotate gets the square popup", func(t *testing.T) {
+		got := paneFor(modeAnnotate, retinaCell)
+		if got.Placement != "popup" || got.Width != "11" || got.Height != "5" {
 			t.Fatalf("paneFor(%q) = %+v", modeAnnotate, got)
 		}
 	})
 	t.Run("the list fallback stays a sized popup", func(t *testing.T) {
-		got := paneFor(modeList)
+		got := paneFor(modeList, retinaCell)
 		if got.Placement != "popup" || got.Width != "80%" || got.Height != "60%" {
 			t.Fatalf("paneFor(%q) = %+v", modeList, got)
 		}
@@ -252,7 +275,7 @@ func TestPaneFor(t *testing.T) {
 	// Only a popup takes a size, so any other placement must ask for none.
 	t.Run("the environment overrides the placement", func(t *testing.T) {
 		t.Setenv("HINTS_PLACEMENT", "overlay")
-		got := paneFor(modeAnnotate)
+		got := paneFor(modeAnnotate, retinaCell)
 		if got.Placement != "overlay" || got.Width != "" || got.Height != "" {
 			t.Fatalf("paneFor() = %+v", got)
 		}
