@@ -228,38 +228,50 @@ func TestLocate(t *testing.T) {
 	}
 }
 
-func TestLinksCompletesWrappedURLFromScrollback(t *testing.T) {
+// A line filled to the pane's last cell continues into the next one, and
+// that is enough to finish the URL without asking Herdr for scrollback.
+func TestLinksCompletesWrappedURL(t *testing.T) {
 	t.Parallel()
-	source := &fakeSource{text: map[[2]string][]string{
-		{"w1:p1", herdr.SourceVisible}:   {"go https://a.io/long-ur", "l-continued here"},
-		{"w1:p1", herdr.SourceUnwrapped}: {"go https://a.io/long-url-continued here"},
-	}}
+	visible := []string{"go https://a.io/long-ur", "l-continued here"}
+	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
 	scanner := newScanner(source)
 	scanner.SkipObserve = true
-	got := scanner.Links(context.Background(), panes("w1:p1"))
+	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
 	if len(got) != 1 || got[0].URL != "https://a.io/long-url-continued" {
 		t.Fatalf("Links() = %+v", got)
 	}
-	if n := source.readCount("w1:p1", herdr.SourceUnwrapped); n != 1 {
-		t.Fatalf("unwrapped reads = %d, want 1 for a wrapped URL", n)
+	if n := source.readCount("w1:p1", herdr.SourceUnwrapped); n != 0 {
+		t.Fatalf("unwrapped reads = %d, want none: the read scrolls the pane", n)
+	}
+}
+
+// A line that stops short of the edge ended there, so the next line is not
+// a continuation however much it looks like one.
+func TestLinksLeavesAShortLineAlone(t *testing.T) {
+	t.Parallel()
+	visible := []string{"go https://a.io/long-ur", "l-continued here"}
+	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
+	scanner := newScanner(source)
+	scanner.SkipObserve = true
+	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: 100, Rows: 24}})
+	if len(got) != 1 || got[0].URL != "https://a.io/long-ur" {
+		t.Fatalf("Links() = %+v", got)
 	}
 }
 
 func TestLinksCompletesURLWrappedAfterADot(t *testing.T) {
 	t.Parallel()
-	source := &fakeSource{text: map[[2]string][]string{
-		{"w1:p1", herdr.SourceVisible}:   {"see https://docs.a.io/guide/v2.", "1/install here"},
-		{"w1:p1", herdr.SourceUnwrapped}: {"see https://docs.a.io/guide/v2.1/install here"},
-	}}
+	visible := []string{"see https://docs.a.io/guide/v2.", "1/install here"}
+	source := &fakeSource{text: map[[2]string][]string{{"w1:p1", herdr.SourceVisible}: visible}}
 	scanner := newScanner(source)
 	scanner.SkipObserve = true
-	got := scanner.Links(context.Background(), panes("w1:p1"))
+	got := scanner.Links(context.Background(), []Pane{{ID: "w1:p1", Cols: len(visible[0]), Rows: 24}})
 	if len(got) != 1 || got[0].URL != "https://docs.a.io/guide/v2.1/install" {
 		t.Fatalf("Links() = %+v", got)
 	}
 }
 
-func TestLinksSkipsScrollbackWithoutWrappedURLs(t *testing.T) {
+func TestLinksNeverReadsScrollback(t *testing.T) {
 	t.Parallel()
 	source := &fakeSource{text: paneText("w1:p1", "go https://a.io/x here")}
 	scanner := newScanner(source)

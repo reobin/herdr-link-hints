@@ -13,8 +13,6 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/links"
 )
 
-const scrollbackLines = 200
-
 // Source is the slice of Herdr that scanning needs.
 type Source interface {
 	PaneLines(ctx context.Context, pane, source string, lines int) ([]string, error)
@@ -85,16 +83,40 @@ func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
 	if len(visible) == 0 {
 		return nil
 	}
-	// Scrollback is fetched only for a wrapped URL.
+	// Rejoined here rather than read back from Herdr: asking for unwrapped
+	// scrollback makes Herdr scroll the pane to answer, and the jump is
+	// visible.
 	var known map[string]bool
 	if needsUnwrapped(visible) {
-		known = links.Known(strings.Join(s.read(ctx, pane.ID, herdr.SourceUnwrapped, scrollbackLines), "\n"))
+		known = links.Known(strings.Join(unwrap(visible, pane.Cols), "\n"))
 	}
 	found := links.Merge(visible, links.FromLines(visible, known), hidden)
 	for i := range found {
 		found[i].Pane = pane.ID
 	}
 	return found
+}
+
+// unwrap rejoins the lines the snapshot broke at the pane's edge: a line
+// filled to the last cell is a soft wrap and continues into the next.
+func unwrap(visible []string, cols int) []string {
+	if cols <= 0 {
+		return visible
+	}
+	var out []string
+	joined := ""
+	for _, line := range visible {
+		joined += line
+		if cells.Width(line) >= cols {
+			continue
+		}
+		out = append(out, joined)
+		joined = ""
+	}
+	if joined != "" {
+		out = append(out, joined)
+	}
+	return out
 }
 
 // needsUnwrapped mirrors the carry in links.FromLines. It matches on the
