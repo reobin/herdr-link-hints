@@ -89,6 +89,7 @@ func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
 	var known map[string]bool
 	if needsUnwrapped(visible) {
 		known = links.Known(strings.Join(unwrap(visible, pane.Cols), "\n"))
+		guardUnwrap(visible, known, pane.Cols)
 	}
 	found := links.Merge(visible, links.FromLines(visible, known), hidden)
 	for i := range found {
@@ -119,21 +120,78 @@ func unwrap(visible []string, cols int) []string {
 	return out
 }
 
-// needsUnwrapped mirrors the carry in links.FromLines. It matches on the
-// raw end, not the cleaned one: whether a trailing "." ends a URL or ends
-// a sentence is the very thing only scrollback can settle.
-func needsUnwrapped(visible []string) bool {
+// guardUnwrap drops a completion only unwrap's own join could vouch for: a
+// carried match ending in trailing punctuation. Whether that mark ends prose
+// or continues the URL is a guess, and the joined text built from that guess
+// must not confirm it. Structural wraps carry no such mark and are kept.
+// Only soft-wrapped lines can join, mirroring unwrap, so a short line never
+// nukes an unrelated completion sharing its prefix.
+func guardUnwrap(visible []string, known map[string]bool, cols int) {
+	for _, c := range carries(visible) {
+		if cols <= 0 || cells.Width(c.line) < cols {
+			continue
+		}
+		if links.Clean(c.raw) == c.raw {
+			continue
+		}
+		cont := continuation(c.next)
+		if cont == "" {
+			continue
+		}
+		want := links.Clean(c.raw + cont)
+		for url := range known {
+			if len(url) >= len(want) && strings.HasPrefix(url, want) {
+				delete(known, url)
+			}
+		}
+	}
+}
+
+// continuation is the next line's first token, the only text unwrap's join
+// could fuse onto the carry. A blank or indented next line breaks the run,
+// so there is no joined artifact to drop.
+func continuation(next string) string {
+	if next == "" {
+		return ""
+	}
+	switch next[0] {
+	case ' ', '\t', '\n', '\r', '\v', '\f':
+		return ""
+	}
+	if i := strings.IndexAny(next, " \t\n\r\v\f"); i >= 0 {
+		return next[:i]
+	}
+	return next
+}
+
+// carry is a raw match running to the end of a non-final line, the case
+// links.FromLines would attempt to complete.
+type carry struct {
+	line string
+	next string
+	raw  string
+}
+
+func carries(visible []string) []carry {
+	var out []carry
 	for i, line := range visible {
 		if i+1 >= len(visible) {
 			break
 		}
 		for _, m := range links.FindAll(line) {
 			if m.End == len(line) {
-				return true
+				out = append(out, carry{line: line, next: visible[i+1], raw: m.Raw})
 			}
 		}
 	}
-	return false
+	return out
+}
+
+// needsUnwrapped mirrors the carry in links.FromLines. It matches on the
+// raw end, not the cleaned one: whether a trailing "." ends a URL or ends
+// a sentence is the very thing only scrollback can settle.
+func needsUnwrapped(visible []string) bool {
+	return len(carries(visible)) > 0
 }
 
 func (s *Scanner) read(ctx context.Context, pane, source string, lines int) []string {
