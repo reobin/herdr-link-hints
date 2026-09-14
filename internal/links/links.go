@@ -144,7 +144,14 @@ func FromLines(lines []string, known map[string]bool) []Visible {
 }
 
 // complete reports how many bytes of this line the continuation consumed.
+// A carry ending in trailing punctuation is prose until proven otherwise,
+// so it never completes from known: the joined text built from that guess
+// must not confirm it.
 func complete(carried Visible, line string, known map[string]bool) (Visible, int) {
+	if Clean(carried.Match) != carried.Match {
+		carried.Match = Clean(carried.Match)
+		return carried, 0
+	}
 	full := longestWithPrefix(known, carried.Match)
 	if full == "" {
 		carried.Match = Clean(carried.Match)
