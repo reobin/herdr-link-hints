@@ -40,13 +40,14 @@ type rpcResponse struct {
 	Error  *rpcError       `json:"error"`
 }
 
+// Code is Herdr's error code, a string rather than the number it looks like.
 type rpcError struct {
-	Code    int    `json:"code"`
+	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
 func (e *rpcError) Error() string {
-	return fmt.Sprintf("herdr rpc error %d: %s", e.Code, e.Message)
+	return fmt.Sprintf("herdr rpc error %s: %s", e.Code, e.Message)
 }
 
 var requestSeq atomic.Uint64

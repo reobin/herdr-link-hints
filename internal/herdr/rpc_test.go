@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,7 +119,7 @@ func TestActivateLinkReportsServerError(t *testing.T) {
 	socket := fakeServer(t, func(request map[string]any) [][]byte {
 		return [][]byte{mustJSON(t, map[string]any{
 			"id":    request["id"],
-			"error": map[string]any{"code": 42, "message": "no link there"},
+			"error": map[string]any{"code": "invalid_params", "message": "no link there"},
 		})}
 	})
 
@@ -127,8 +128,11 @@ func TestActivateLinkReportsServerError(t *testing.T) {
 		t.Fatal("expected the server error to surface")
 	}
 	var rpcErr *rpcError
-	if !errors.As(err, &rpcErr) || rpcErr.Code != 42 {
-		t.Fatalf("err = %v, want an rpcError with code 42", err)
+	if !errors.As(err, &rpcErr) || rpcErr.Code != "invalid_params" {
+		t.Fatalf("err = %v, want an rpcError with code invalid_params", err)
+	}
+	if !strings.Contains(err.Error(), "no link there") {
+		t.Fatalf("err = %v, want the server's message kept", err)
 	}
 }
 
