@@ -364,3 +364,66 @@ func TestPlaceAvoidsANeighboursLink(t *testing.T) {
 		t.Fatalf("place() = %d, %d; want 6, 10", row, col)
 	}
 }
+
+// Three links on one row exhausted the old four-spot search, so the third
+// badge landed on a taken cell. The spiral has to place all three clear
+// of every link and of each other.
+func TestClipPlacesThreeBadgesOnOneRow(t *testing.T) {
+	t.Parallel()
+	wide := Size{Cols: 80, Rows: 24}
+	badges := []Badge{
+		{Row: 5, Col: 10, Width: 1, Code: "as"},
+		{Row: 5, Col: 11, Width: 1, Code: "df"},
+		{Row: 5, Col: 12, Width: 1, Code: "gh"},
+	}
+	placed := clip(badges, wide)
+	if len(placed) != 3 {
+		t.Fatalf("clip() placed %d badges, want 3", len(placed))
+	}
+	links := linkCells(badges, wide)
+	used := map[point]bool{}
+	for _, p := range placed {
+		for col := p.col; col < p.col+len(p.code); col++ {
+			at := point{p.row, col}
+			if links[at] {
+				t.Fatalf("badge %+v covers a link cell %+v", p, at)
+			}
+			if used[at] {
+				t.Fatalf("two badges share %+v: %+v", at, placed)
+			}
+			used[at] = true
+		}
+	}
+}
+
+// When the rows directly above and below hold neighbour links, the badge
+// escapes to the second row out rather than overlapping one.
+func TestPlaceReachesTheSecondRow(t *testing.T) {
+	t.Parallel()
+	wide := Size{Cols: 80, Rows: 24}
+	badges := []Badge{
+		{Row: 4, Col: 8, Width: 6, Code: "sd"},
+		{Row: 5, Col: 10, Width: 4, Code: "as"},
+		{Row: 6, Col: 8, Width: 6, Code: "df"},
+	}
+	taken := linkCells(badges, wide)
+	if row, col := place(badges[1], 2, wide, taken); row != 3 || col != 10 {
+		t.Fatalf("place() = %d, %d; want 3, 10", row, col)
+	}
+}
+
+// When every aligned column is taken, the badge shifts a few cells aside
+// on a nearby row instead of overlapping.
+func TestPlaceShiftsSidewaysWhenAlignedIsTaken(t *testing.T) {
+	t.Parallel()
+	wide := Size{Cols: 80, Rows: 24}
+	badge := Badge{Row: 5, Col: 10, Width: 4, Code: "as"}
+	taken := map[point]bool{}
+	for _, row := range []int{3, 4, 6, 7} {
+		taken[point{row, 10}] = true
+		taken[point{row, 11}] = true
+	}
+	if row, col := place(badge, 2, wide, taken); row != 4 || col != 8 {
+		t.Fatalf("place() = %d, %d; want 4, 8", row, col)
+	}
+}
