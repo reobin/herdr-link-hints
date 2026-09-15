@@ -327,7 +327,7 @@ func TestLinksNeverReadsScrollback(t *testing.T) {
 	}
 }
 
-func TestNeedsUnwrapped(t *testing.T) {
+func TestCarriesFindsWhatNeedsUnwrapping(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -343,8 +343,9 @@ func TestNeedsUnwrapped(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := needsUnwrapped(tc.visible); got != tc.want {
-				t.Fatalf("needsUnwrapped(%q) = %v, want %v", tc.visible, got, tc.want)
+			got := len(carries(tc.visible, links.MatchLines(tc.visible))) > 0
+			if got != tc.want {
+				t.Fatalf("carries(%q) = %v, want %v", tc.visible, got, tc.want)
 			}
 		})
 	}
