@@ -248,3 +248,34 @@ func TestPaneFor(t *testing.T) {
 		}
 	})
 }
+
+// Every keystroke that narrows the matches redraws every pane, and a
+// full-viewport render is 5-7ms, so a pane whose badges did not move must
+// not be re-encoded. Only an identical badge set already on screen counts.
+func TestMarkerSkipsOnlyUnchangedPanes(t *testing.T) {
+	t.Parallel()
+	badges := []overlay.Badge{{Row: 1, Col: 2, Width: 4, Code: "as"}}
+	m := &marker{
+		drawn: map[string]bool{"w1:p1": true},
+		shown: map[string][]overlay.Badge{"w1:p1": badges},
+	}
+
+	if !m.unchanged("w1:p1", []overlay.Badge{{Row: 1, Col: 2, Width: 4, Code: "as"}}) {
+		t.Fatal("an identical badge set should not be redrawn")
+	}
+	dimmed := []overlay.Badge{{Row: 1, Col: 2, Width: 4, Code: "as", Dim: true}}
+	if m.unchanged("w1:p1", dimmed) {
+		t.Fatal("dimming a badge changes the image, so it has to be redrawn")
+	}
+	if m.unchanged("w1:p1", nil) {
+		t.Fatal("losing every badge changes the image, so it has to be redrawn")
+	}
+	if m.unchanged("w1:p2", nil) {
+		t.Fatal("a pane never drawn on has nothing on screen to keep")
+	}
+
+	m.drawn["w1:p1"] = false
+	if m.unchanged("w1:p1", badges) {
+		t.Fatal("a pane whose layer was cleared has to be drawn again")
+	}
+}

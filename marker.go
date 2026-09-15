@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"log/slog"
+	"slices"
+	"sync"
 
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/overlay"
@@ -17,7 +19,9 @@ type marker struct {
 	log    *slog.Logger
 	colors theme.Colors
 	views  map[string]paneView
+	mu     sync.Mutex
 	drawn  map[string]bool
+	shown  map[string][]overlay.Badge
 }
 
 type paneView struct {
@@ -48,7 +52,8 @@ func newMarker(client *herdr.Client, log *slog.Logger, colors theme.Colors, pane
 			size: size,
 		}
 	}
-	return &marker{client: client, log: log, colors: colors, views: views, drawn: map[string]bool{}}
+	return &marker{client: client, log: log, colors: colors, views: views,
+		drawn: map[string]bool{}, shown: map[string][]overlay.Badge{}}
 }
 
 // content strips the border off a pane's layout rect: the border is what
@@ -63,37 +68,65 @@ func content(pane herdr.Pane, viewportRows int) overlay.Size {
 // live reports whether there is anywhere to draw.
 func (m *marker) live() bool { return m != nil && len(m.views) > 0 }
 
+// draw renders each pane in parallel and leaves the unchanged ones alone.
+// A full-viewport render is 5-7ms at retina cell sizes, and every keystroke
+// that narrows the matches redraws every pane, so serially re-encoding a
+// pane whose badges did not move costs that much again for an identical
+// image. A pane with no links never changes at all.
 func (m *marker) draw(ctx context.Context, badges map[string][]overlay.Badge) {
+	var wg sync.WaitGroup
 	for pane, view := range m.views {
-		frame, err := overlay.Render(overlay.Scene{
-			Badges:   badges[pane],
-			Colors:   m.colors,
-			Cell:     view.cell,
-			Viewport: view.size,
-		})
-		if err != nil {
-			m.log.Debug("render overlay failed", "pane", pane, "error", err)
-			m.clearPane(ctx, pane)
+		if m.unchanged(pane, badges[pane]) {
 			continue
 		}
-		if err := m.client.SetGraphics(ctx, herdr.Frame{
-			Pane:   pane,
-			Layer:  overlay.LayerID,
-			ZIndex: overlayZ,
-			PNG:    frame.PNG,
-			Width:  frame.Width,
-			Height: frame.Height,
-			Row:    frame.Row,
-			Col:    frame.Col,
-			Rows:   frame.Rows,
-			Cols:   frame.Cols,
-		}); err != nil {
-			m.log.Debug("set overlay failed", "pane", pane, "error", err)
-			m.clearPane(ctx, pane)
-			continue
-		}
-		m.drawn[pane] = true
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.drawPane(ctx, pane, view, badges[pane])
+		}()
 	}
+	wg.Wait()
+}
+
+func (m *marker) unchanged(pane string, badges []overlay.Badge) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	shown, ok := m.shown[pane]
+	return ok && m.drawn[pane] && slices.Equal(shown, badges)
+}
+
+func (m *marker) drawPane(ctx context.Context, pane string, view paneView, badges []overlay.Badge) {
+	frame, err := overlay.Render(overlay.Scene{
+		Badges:   badges,
+		Colors:   m.colors,
+		Cell:     view.cell,
+		Viewport: view.size,
+	})
+	if err != nil {
+		m.log.Debug("render overlay failed", "pane", pane, "error", err)
+		m.clearPane(ctx, pane)
+		return
+	}
+	if err := m.client.SetGraphics(ctx, herdr.Frame{
+		Pane:   pane,
+		Layer:  overlay.LayerID,
+		ZIndex: overlayZ,
+		PNG:    frame.PNG,
+		Width:  frame.Width,
+		Height: frame.Height,
+		Row:    frame.Row,
+		Col:    frame.Col,
+		Rows:   frame.Rows,
+		Cols:   frame.Cols,
+	}); err != nil {
+		m.log.Debug("set overlay failed", "pane", pane, "error", err)
+		m.clearPane(ctx, pane)
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.drawn[pane] = true
+	m.shown[pane] = slices.Clone(badges)
 }
 
 func (m *marker) clear(ctx context.Context) {
@@ -103,12 +136,18 @@ func (m *marker) clear(ctx context.Context) {
 }
 
 func (m *marker) clearPane(ctx context.Context, pane string) {
-	if !m.drawn[pane] {
+	m.mu.Lock()
+	drawn := m.drawn[pane]
+	m.mu.Unlock()
+	if !drawn {
 		return
 	}
 	if err := m.client.ClearGraphics(ctx, pane, overlay.LayerID); err != nil {
 		m.log.Debug("clear overlay failed", "pane", pane, "error", err)
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.drawn, pane)
+	delete(m.shown, pane)
 }
