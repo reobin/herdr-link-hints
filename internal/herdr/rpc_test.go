@@ -172,8 +172,8 @@ func TestActivateLinkWithoutServer(t *testing.T) {
 	}
 }
 
-// The real server closes the connection after each response, so one
-// client dials once per call instead of holding a connection.
+// One client dials once per call, so a reply can only reach the decoder
+// that asked for it.
 func TestClientDialsPerCall(t *testing.T) {
 	t.Parallel()
 	var conns atomic.Int64
@@ -195,8 +195,8 @@ func TestClientDialsPerCall(t *testing.T) {
 	}
 }
 
-// A failed call closes its connection, so the next call dials fresh
-// instead of reading from a dead socket.
+// A failed call closes its connection, so the next call dials again
+// rather than reading from one it already gave up on.
 func TestFailedCallRedials(t *testing.T) {
 	t.Parallel()
 	var conns atomic.Int64
