@@ -11,6 +11,90 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
+// drawOneGlyph fills a cell-sized image with bg and draws r in fg, so tests
+// can read back the exact palette indices a glyph wrote.
+func drawOneGlyph(cell Cell, r rune, fg, bg uint8, dim, inverted bool) *image.Paletted {
+	img := image.NewPaletted(image.Rect(0, 0, cell.Width, cell.Height), newPalette(theme.Fallback()))
+	fill(img, img.Rect, bg)
+	drawGlyph(img, r, 0, 0, cell, fg, dim, inverted)
+	return img
+}
+
+func usesBlends(img *image.Paletted) bool {
+	for _, index := range img.Pix {
+		if index >= aaBase {
+			return true
+		}
+	}
+	return false
+}
+
+// At the retina cell from the issue the edges blend into the background
+// instead of stepping in whole blocks.
+func TestSmoothGlyphBlendsEdgesAtScaleThree(t *testing.T) {
+	t.Parallel()
+	img := drawOneGlyph(Cell{Width: 18, Height: 38}, 'a', colorText, colorBackground, false, false)
+	if !usesBlends(img) {
+		t.Fatal("a scale 3 glyph wrote no edge blends")
+	}
+	foundCore := false
+	for _, index := range img.Pix {
+		if index == colorText {
+			foundCore = true
+		}
+	}
+	if !foundCore {
+		t.Fatal("a smoothed glyph lost its full-coverage core")
+	}
+}
+
+// A typed prefix inverts the glyph against its cell, and a ruled-out badge
+// fades: both still blend, each against their own background.
+func TestSmoothGlyphBlendsEachRamp(t *testing.T) {
+	t.Parallel()
+	big := Cell{Width: 18, Height: 38}
+	cases := []struct {
+		name          string
+		fg, bg        uint8
+		dim, inverted bool
+		pair          uint8
+	}{
+		{"bright", colorText, colorBackground, false, false, aaBright},
+		{"typed", colorBackground, colorText, false, true, aaBrightInverted},
+		{"dim", colorDimText, colorDimBackground, true, false, aaDim},
+		{"dim typed", colorDimBackground, colorDimText, true, true, aaDimInverted},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			img := drawOneGlyph(big, 'a', tc.fg, tc.bg, tc.dim, tc.inverted)
+			blends := false
+			for _, index := range img.Pix {
+				if index < aaBase {
+					continue
+				}
+				blends = true
+				if got := (index - aaBase) / aaLevels; got != tc.pair {
+					t.Fatalf("blend index %d sits on ramp %d, want %d", index, got, tc.pair)
+				}
+			}
+			if !blends {
+				t.Fatal("no edge blends written")
+			}
+		})
+	}
+}
+
+// Below the smoothing scale a glyph writes flat foreground only, exactly as
+// before.
+func TestHardGlyphWritesNoBlendsAtScaleOne(t *testing.T) {
+	t.Parallel()
+	img := drawOneGlyph(Cell{Width: 9, Height: 19}, 'a', colorText, colorBackground, false, false)
+	if usesBlends(img) {
+		t.Fatal("a scale 1 glyph wrote edge blends")
+	}
+}
+
 var cell = Cell{Width: 8, Height: 16}
 
 func scene(badges []Badge, viewport Size) Scene {

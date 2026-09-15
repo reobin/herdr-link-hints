@@ -32,6 +32,30 @@ const (
 	colorDimText
 )
 
+// aaBase is the first palette entry past the flat colours: the blends a
+// smoothed glyph edge is quantized into.
+const aaBase = colorDimText + 1
+
+// aaSteps is the coverage levels per smoothed edge pixel: 0 the badge
+// background, aaSteps the glyph foreground.
+const aaSteps = 4
+
+// aaLevels is the blends stored per foreground/background pair.
+const aaLevels = aaSteps - 1
+
+const (
+	aaBright uint8 = iota
+	aaBrightInverted
+	aaDim
+	aaDimInverted
+	aaPairs
+)
+
+// smoothScale is the glyph scale where hard nearest-neighbour edges start
+// to read next to antialiased terminal text. Below it glyphs draw exactly
+// as before.
+const smoothScale = 3
+
 // scrimAlpha reads as dimming only because Herdr alpha-blends the layer.
 const scrimAlpha = 0x66
 
@@ -41,18 +65,55 @@ const dimAlpha = 0xB0
 // newPalette derives every colour from the ones the terminal reported. The
 // badge takes the palette entry with the most contrast against the
 // background, so it survives light themes where yellow alone is a smudge.
+// The tail holds the edge blends a smoothed glyph is quantized into, one
+// ramp per foreground/background pair it can sit on.
 func newPalette(c theme.Colors) color.Palette {
 	accent, _ := theme.BestAccent(c)
-	palette := make(color.Palette, colorDimText+1)
+	background := accent
+	text := c.Background
+	dimBackground := theme.Fade(theme.Mix(accent, c.Background, 0.55), dimAlpha)
+	dimText := theme.Fade(c.Background, dimAlpha)
+	palette := make(color.Palette, aaBase+aaPairs*aaLevels)
 	palette[colorHole] = color.RGBA{}
 	palette[colorScrim] = theme.Fade(c.Background, scrimAlpha)
 	palette[colorBorder] = theme.Mix(accent, c.Background, 0.45)
-	palette[colorBackground] = accent
-	palette[colorText] = c.Background
+	palette[colorBackground] = background
+	palette[colorText] = text
 	palette[colorDimBorder] = theme.Fade(theme.Mix(accent, c.Background, 0.65), dimAlpha)
-	palette[colorDimBackground] = theme.Fade(theme.Mix(accent, c.Background, 0.55), dimAlpha)
-	palette[colorDimText] = theme.Fade(c.Background, dimAlpha)
+	palette[colorDimBackground] = dimBackground
+	palette[colorDimText] = dimText
+	ramps := []struct {
+		pair   uint8
+		fg, bg color.RGBA
+	}{
+		{aaBright, text, background},
+		{aaBrightInverted, background, text},
+		{aaDim, dimText, dimBackground},
+		{aaDimInverted, dimBackground, dimText},
+	}
+	for _, ramp := range ramps {
+		for level := 1; level < aaSteps; level++ {
+			palette[aaBase+ramp.pair*aaLevels+uint8(level-1)] = theme.Mix(ramp.bg, ramp.fg, float64(level)/aaSteps)
+		}
+	}
 	return palette
+}
+
+// aaIndex is the palette entry for an edge pixel covering level/aaSteps of
+// the foreground over the background.
+func aaIndex(dim, inverted bool, level int) uint8 {
+	var pair uint8
+	switch {
+	case dim && inverted:
+		pair = aaDimInverted
+	case dim:
+		pair = aaDim
+	case inverted:
+		pair = aaBrightInverted
+	default:
+		pair = aaBright
+	}
+	return aaBase + pair*aaLevels + uint8(level-1)
 }
 
 // Badge is one hint code and the link it marks. Before is the blank cells
@@ -304,11 +365,12 @@ func drawBadge(img *image.Paletted, p placement, cell Cell) {
 	}
 	outline(img, box, badgeColor(p.dim, colorBorder, colorDimBorder))
 	for i, r := range p.code {
-		glyphColor := badgeColor(p.dim, colorText, colorDimText)
-		if i < p.typed {
-			glyphColor = badgeColor(p.dim, colorBackground, colorDimBackground)
+		fg := badgeColor(p.dim, colorText, colorDimText)
+		inverted := i < p.typed
+		if inverted {
+			fg = badgeColor(p.dim, colorBackground, colorDimBackground)
 		}
-		drawGlyph(img, r, box.Min.X+i*cell.Width, box.Min.Y, cell, glyphColor)
+		drawGlyph(img, r, box.Min.X+i*cell.Width, box.Min.Y, cell, fg, p.dim, inverted)
 	}
 }
 
@@ -323,7 +385,7 @@ func cellRect(row, col, cols, rows int, cell Cell) image.Rectangle {
 	return image.Rect(col*cell.Width, row*cell.Height, (col+cols)*cell.Width, (row+rows)*cell.Height)
 }
 
-func drawGlyph(img *image.Paletted, r rune, x, y int, cell Cell, index uint8) {
+func drawGlyph(img *image.Paletted, r rune, x, y int, cell Cell, fg uint8, dim, inverted bool) {
 	bitmap, ok := glyph(r)
 	if !ok {
 		return
@@ -331,14 +393,74 @@ func drawGlyph(img *image.Paletted, r rune, x, y int, cell Cell, index uint8) {
 	scale := glyphScale(cell)
 	x += (cell.Width - glyphWidth*scale) / 2
 	y += (cell.Height - glyphHeight*scale) / 2
-	for row, bits := range bitmap {
-		for col := range glyphWidth {
-			if bits&byte(1<<(glyphWidth-1-col)) == 0 {
+	if scale < smoothScale {
+		for row, bits := range bitmap {
+			for col := range glyphWidth {
+				if bits&byte(1<<(glyphWidth-1-col)) == 0 {
+					continue
+				}
+				fill(img, image.Rect(x+col*scale, y+row*scale, x+(col+1)*scale, y+(row+1)*scale), fg)
+			}
+		}
+		return
+	}
+	drawSmoothGlyph(img, bitmap, x, y, scale, fg, dim, inverted)
+}
+
+// drawSmoothGlyph covers each output pixel against the bitmap and writes
+// the quantized blend of the foreground over the background, so a scaled-up
+// glyph reads antialiased next to terminal text. The footprint carries a
+// half-pixel phase: at integer scales every edge would otherwise land on a
+// pixel boundary and no coverage could ever be fractional. At these sizes
+// the cost is nothing next to the PNG encode.
+func drawSmoothGlyph(img *image.Paletted, bitmap [glyphHeight]byte, x, y, scale int, fg uint8, dim, inverted bool) {
+	w, h := glyphWidth*scale, glyphHeight*scale
+	for oy := 0; oy < h; oy++ {
+		for ox := 0; ox < w; ox++ {
+			px, py := x+ox, y+oy
+			if px < img.Rect.Min.X || px >= img.Rect.Max.X || py < img.Rect.Min.Y || py >= img.Rect.Max.Y {
 				continue
 			}
-			fill(img, image.Rect(x+col*scale, y+row*scale, x+(col+1)*scale, y+(row+1)*scale), index)
+			x0 := (float64(ox) + 0.5) / float64(scale)
+			x1 := (float64(ox) + 1.5) / float64(scale)
+			y0 := (float64(oy) + 0.5) / float64(scale)
+			y1 := (float64(oy) + 1.5) / float64(scale)
+			level := int(coverage(bitmap, x0, x1, y0, y1)*aaSteps + 0.5)
+			if level <= 0 {
+				continue
+			}
+			index := fg
+			if level < aaSteps {
+				index = aaIndex(dim, inverted, level)
+			}
+			img.Pix[(py-img.Rect.Min.Y)*img.Stride+(px-img.Rect.Min.X)] = index
 		}
 	}
+}
+
+// coverage is the fraction of the source-space rect the bitmap covers. The
+// half-pixel phase keeps rect edges off integer source coordinates, so the
+// overlap never needs an exact-boundary rule.
+func coverage(bitmap [glyphHeight]byte, x0, x1, y0, y1 float64) float64 {
+	area := 0.0
+	for jy := int(y0); float64(jy) < y1; jy++ {
+		if jy < 0 || jy >= glyphHeight {
+			continue
+		}
+		bits := bitmap[jy]
+		loy := max(y0, float64(jy))
+		hiy := min(y1, float64(jy+1))
+		for jx := int(x0); float64(jx) < x1; jx++ {
+			if jx < 0 || jx >= glyphWidth {
+				continue
+			}
+			if bits&byte(1<<(glyphWidth-1-jx)) == 0 {
+				continue
+			}
+			area += (min(x1, float64(jx+1)) - max(x0, float64(jx))) * (hiy - loy)
+		}
+	}
+	return area / ((x1 - x0) * (y1 - y0))
 }
 
 // glyphScale leaves a pixel of padding where the cell allows it, never
