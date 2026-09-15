@@ -59,25 +59,16 @@ func run(args []string) int {
 	return pick()
 }
 
-// open settles whether annotations are possible before opening the pane:
-// a pane's shape is fixed once it opens.
+// open asks Herdr for the picker pane. The pane has a fixed content-sized
+// shape, so opening needs no probe of the focused pane.
 func open() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	log := newLogger()
-	focused := focusedPane()
-	if focused == "" {
-		log.Debug("could not resolve the focused pane")
-		return exitFailed
-	}
 
 	client := herdr.New()
-	cell, ok := graphicsCell(ctx, client, focused, log)
-	if !ok {
-		return exitFailed
-	}
-	open := paneFor(cell)
+	open := paneFor()
 	pane, err := client.OpenPane(ctx, open)
 	if err != nil {
 		log.Debug("open picker pane failed", "placement", open.Placement, "error", err)
@@ -90,7 +81,7 @@ func open() int {
 
 // paneFor picks the placement. Only a popup can be sized, and only a popup
 // floats rather than reflowing the pane the hints are drawn on.
-func paneFor(cell herdr.Graphics) herdr.PaneOpen {
+func paneFor() herdr.PaneOpen {
 	open := herdr.PaneOpen{
 		Plugin:     pluginID,
 		Entrypoint: entrypoint,
@@ -104,49 +95,29 @@ func paneFor(cell herdr.Graphics) herdr.PaneOpen {
 		open.Env["HINTS_DEBUG"] = debug
 	}
 	if open.Placement == "popup" {
-		open.Width, open.Height = paneShape(cell)
+		open.Width, open.Height = paneShape()
 	}
 	return open
 }
 
-// graphicsCell is the cell size that squares the popup. Without graphics
-// there is nothing to draw on, so opening fails.
-func graphicsCell(ctx context.Context, client *herdr.Client, pane string, log *slog.Logger) (herdr.Graphics, bool) {
-	info, err := client.GraphicsInfo(ctx, pane)
-	if err != nil {
-		log.Debug("graphics unavailable", "pane", pane, "error", err)
-		return info, false
-	}
-	log.Debug("graphics",
-		"pane", pane,
-		"cell_width_px", info.CellWidthPx,
-		"cell_height_px", info.CellHeightPx,
-		"pane_visible", info.PaneVisible,
-		"max_layers_per_pane", info.MaxLayers)
-	if !info.PaneVisible || info.CellWidthPx <= 0 || info.CellHeightPx <= 0 {
-		return info, false
-	}
-	return info, true
-}
+// contentCols is the fixed content width of the picker popup. The readout's
+// widest lines are the spinner with its label ("⠋ scanning", ten cells)
+// and a three-digit count with its unit ("999 links", nine cells), so 22
+// holds either with room for the centred padding that keeps the left edge
+// still.
+const contentCols = 22
 
-// annotateRows is the outer height of the annotate popup. Herdr takes a
-// border off each side, and four gives two content rows, which cannot
-// centre a line; five gives three.
-const annotateRows = 5
+// contentRows is the fixed content height of the picker popup. The readout
+// is two rows, the echo above the count, and three content rows centre the
+// count on the middle row; the spinner alone centres the same way.
+const contentRows = 3
 
-// paneShape keeps the annotate popup square on screen. Cells are far taller
-// than they are wide, so squareness is a pixel measure, not a cell count.
-func paneShape(cell herdr.Graphics) (width, height string) {
-	width, height = strconv.Itoa(squareCols(cell)), strconv.Itoa(annotateRows)
+// paneShape is the fixed picker popup shape. Herdr numbers are outer
+// dimensions, and it takes a border cell off each side with the required
+// title drawn on it, so the content size grows by two each way.
+func paneShape() (width, height string) {
+	width, height = strconv.Itoa(contentCols+2), strconv.Itoa(contentRows+2)
 	return envOr("HINTS_WIDTH", width), envOr("HINTS_HEIGHT", height)
-}
-
-// The fallback is a typical 2:1 cell, for a terminal that reported nothing.
-func squareCols(cell herdr.Graphics) int {
-	if cell.CellWidthPx <= 0 || cell.CellHeightPx <= 0 {
-		return annotateRows * 2
-	}
-	return max(annotateRows*cell.CellHeightPx/cell.CellWidthPx, 1)
 }
 
 func runDemo() int {

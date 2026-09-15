@@ -84,7 +84,7 @@ herdr plugin link /path/to/herdr-link-hints
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `HINTS_WIDTH` | square of the cell | picker popup width |
+| `HINTS_WIDTH` | 24 | picker popup width |
 | `HINTS_HEIGHT` | 5 | picker popup height |
 | `HINTS_PLACEMENT` | popup | picker pane placement; only popup takes a size |
 | `HINTS_NO_OBSERVE` | unset | skip the observe stream when set |
