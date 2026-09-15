@@ -209,6 +209,10 @@ type PaneOpen struct {
 	Env        map[string]string
 }
 
+// OpenPane returns the new pane's id where Herdr reports one. Popup
+// placement does not: it answers with an empty result, so the id comes back
+// blank and there is no handle to close the popup with afterwards. Esc is
+// the only way out of a stuck one.
 func (c *Client) OpenPane(ctx context.Context, p PaneOpen) (string, error) {
 	params := map[string]any{
 		"plugin_id":  p.Plugin,
