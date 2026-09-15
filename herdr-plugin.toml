@@ -14,13 +14,9 @@ title = "Hint links in focused pane"
 contexts = ["pane"]
 command = ["bash", "hints-open.sh"]
 
-# The pane's shape is decided in `picker --open`. HINTS_WIDTH and
-# HINTS_HEIGHT override it.
+# A title is required, and Herdr draws it on the pane border.
 [[panes]]
 id = "picker"
-# A title is required, and Herdr draws it on the pane border. In annotate
-# mode the pane is a few cells of keyboard surface with nothing to announce,
-# so this is the shortest title that still loads.
-title = "·"
+title = "Link Hints"
 placement = "popup"
 command = ["./picker"]
