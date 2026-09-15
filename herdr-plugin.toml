@@ -14,9 +14,9 @@ title = "Hint links in focused pane"
 contexts = ["pane"]
 command = ["bash", "hints-open.sh"]
 
-# The picker pane takes no title and no border: Herdr draws the title on
-# the border, so any title is chrome around a two-row readout.
+# A title is required, and Herdr draws it on the pane border.
 [[panes]]
 id = "picker"
+title = "Link Hints"
 placement = "popup"
 command = ["./picker"]

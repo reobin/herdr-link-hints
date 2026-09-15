@@ -100,22 +100,23 @@ func paneFor() herdr.PaneOpen {
 	return open
 }
 
-// popupCols is the fixed width of the picker popup. The readout's widest
-// lines are the spinner with its label ("⠋ scanning", ten cells) and a
-// three-digit count with its unit ("999 links", nine cells), so 22 holds
-// either with room for the centred padding that keeps the left edge still.
-const popupCols = 22
+// contentCols is the fixed content width of the picker popup. The readout's
+// widest lines are the spinner with its label ("⠋ scanning", ten cells)
+// and a three-digit count with its unit ("999 links", nine cells), so 22
+// holds either with room for the centred padding that keeps the left edge
+// still.
+const contentCols = 22
 
-// popupRows is the fixed height of the picker popup. The readout is two
-// rows, the echo above the count, and three outer rows centre the count on
-// the middle row.
-const popupRows = 3
+// contentRows is the fixed content height of the picker popup. The readout
+// is two rows, the echo above the count, and three content rows centre the
+// count on the middle row; the spinner alone centres the same way.
+const contentRows = 3
 
-// paneShape is the fixed picker popup shape. It is a cell count, not a
-// pixel measure: with no title and no border there is nothing to square
-// against the cell aspect.
+// paneShape is the fixed picker popup shape. Herdr numbers are outer
+// dimensions, and it takes a border cell off each side with the required
+// title drawn on it, so the content size grows by two each way.
 func paneShape() (width, height string) {
-	width, height = strconv.Itoa(popupCols), strconv.Itoa(popupRows)
+	width, height = strconv.Itoa(contentCols+2), strconv.Itoa(contentRows+2)
 	return envOr("HINTS_WIDTH", width), envOr("HINTS_HEIGHT", height)
 }
 

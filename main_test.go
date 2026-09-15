@@ -201,20 +201,21 @@ func TestContentStripsThePaneBorder(t *testing.T) {
 
 // The popup is a fixed content-sized box: wide enough for the spinner with
 // its label and a three-digit count with its unit, tall enough to centre
-// the count on the middle row.
+// the count on the middle row. Herdr numbers are outer dimensions with a
+// border cell on each side, so the asked shape is two bigger each way.
 func TestPaneShape(t *testing.T) {
 	t.Run("the fixed shape holds the readout", func(t *testing.T) {
 		t.Parallel()
 		width, height := paneShape()
-		if width != "22" || height != "3" {
+		if width != "24" || height != "5" {
 			t.Fatalf("paneShape() = %q, %q", width, height)
 		}
 	})
 	t.Run("the fixed width holds the widest readout lines", func(t *testing.T) {
 		t.Parallel()
 		for _, text := range []string{"\u280b scanning", "999 links", "no match"} {
-			if got := len([]rune(text)); got > popupCols {
-				t.Fatalf("%q is %d cells, wider than popupCols %d", text, got, popupCols)
+			if got := len([]rune(text)); got > contentCols {
+				t.Fatalf("%q is %d cells, wider than contentCols %d", text, got, contentCols)
 			}
 		}
 	})
@@ -232,7 +233,7 @@ func TestPaneShape(t *testing.T) {
 func TestPaneFor(t *testing.T) {
 	t.Run("annotate gets the fixed popup", func(t *testing.T) {
 		got := paneFor()
-		if got.Placement != "popup" || got.Width != "22" || got.Height != "3" {
+		if got.Placement != "popup" || got.Width != "24" || got.Height != "5" {
 			t.Fatalf("paneFor() = %+v", got)
 		}
 	})
