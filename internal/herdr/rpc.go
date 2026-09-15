@@ -61,25 +61,26 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	ctx, cancel := context.WithTimeout(ctx, c.rpcTimeout)
 	defer cancel()
 
-	// The server closes the connection after each response, so every
-	// call dials fresh: reusing a connection fails the next write with
-	// a broken pipe.
-	conn, err := c.dial(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = conn.Close() }()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
-
+	// Encoded before dialling, not after. The server reads a request line a
+	// byte at a time and sleeps 100ms whenever that read comes up empty, so
+	// any work between connecting and writing loses the race and waits out
+	// the poll.
 	id := nextRequestID()
 	body, err := json.Marshal(rpcRequest{ID: id, Method: method, Params: params})
 	if err != nil {
 		return fmt.Errorf("encode %s request: %w", method, err)
 	}
-	if _, err := conn.Write(append(body, '\n')); err != nil {
+	body = append(body, '\n')
+
+	conn, err := c.send(ctx, body)
+	if err != nil {
 		return fmt.Errorf("send %s request: %w", method, err)
+	}
+	defer func() { _ = conn.Close() }()
+	// After the write: a deadline set before it is one more thing between
+	// connect and the first byte.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
 	}
 
 	// The socket also carries events and other clients' replies.
@@ -103,6 +104,29 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 		}
 		return nil
 	}
+}
+
+// sendMu keeps concurrent callers from interleaving their connect and
+// write. Two goroutines that dial at once both land in the server's poll
+// and both wait it out; queued, the second pays nothing.
+var sendMu sync.Mutex
+
+// send dials and writes the request as one step, and hands back the
+// connection to read the reply from. The lock is released before the read,
+// which is where the waiting belongs.
+func (c *Client) send(ctx context.Context, body []byte) (net.Conn, error) {
+	sendMu.Lock()
+	defer sendMu.Unlock()
+
+	conn, err := c.dial(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := conn.Write(body); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 // dial opens one connection for a single call.
