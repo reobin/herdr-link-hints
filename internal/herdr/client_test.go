@@ -1,8 +1,11 @@
 package herdr
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -212,5 +215,21 @@ func TestSocketFallsBackToCLI(t *testing.T) {
 		t.Fatal("expected an error when both paths fail")
 	} else if scroll != (Scroll{}) {
 		t.Fatalf("PaneScroll() = %+v, want a zero Scroll", scroll)
+	}
+}
+
+// A socket that accepts and never answers burns the whole rpc timeout
+// before the CLI is even tried, so the error it hides has to reach the log.
+func TestFallbackLogsTheSocketError(t *testing.T) {
+	t.Parallel()
+	var logged bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	client := New(WithSocket(socketPath(t)), WithLogger(log))
+
+	if _, err := client.PaneLines(context.Background(), "w1:p9"); err == nil {
+		t.Fatal("expected an error when both paths fail")
+	}
+	if got := logged.String(); !strings.Contains(got, "pane.read") {
+		t.Fatalf("log = %q, want it to name the failed method", got)
 	}
 }

@@ -67,15 +67,18 @@ func open() int {
 
 	log := newLogger()
 
-	client := herdr.New()
+	client := herdr.New(herdr.WithLogger(log))
 	open := paneFor()
 	pane, err := client.OpenPane(ctx, open)
 	if err != nil {
 		log.Debug("open picker pane failed", "placement", open.Placement, "error", err)
 		return exitFailed
 	}
-	log.Debug("picker pane opened", "pane", pane,
-		"placement", open.Placement, "width", open.Width, "height", open.Height)
+	attrs := []any{"placement", open.Placement, "width", open.Width, "height", open.Height}
+	if pane != "" {
+		attrs = append(attrs, "pane", pane)
+	}
+	log.Debug("picker pane opened", attrs...)
 	return exitOK
 }
 

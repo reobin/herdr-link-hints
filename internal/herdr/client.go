@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,7 @@ type Client struct {
 	socket     string
 	cmdTimeout time.Duration
 	rpcTimeout time.Duration
+	log        *slog.Logger
 }
 
 func New(opts ...Option) *Client {
@@ -37,11 +39,24 @@ func New(opts ...Option) *Client {
 		socket:     envOr("HERDR_SOCKET_PATH", defaultSocket()),
 		cmdTimeout: 15 * time.Second,
 		rpcTimeout: 5 * time.Second,
+		log:        slog.New(slog.DiscardHandler),
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	// The shim that resolves a bare name costs 100ms a call, against 6ms
+	// for the binary it ends up running.
+	if os.Getenv("HERDR_BIN_PATH") == "" {
+		c.log.Debug("HERDR_BIN_PATH unset, resolving herdr through PATH", "bin", c.bin)
+	}
 	return c
+}
+
+// fellBack records a socket error the CLI is about to paper over. A dial
+// refused returns at once, but a server that accepts and goes quiet costs
+// the full rpc timeout here and the command timeout again below.
+func (c *Client) fellBack(method string, err error) {
+	c.log.Debug("socket call failed, falling back to the CLI", "method", method, "error", err)
 }
 
 func envOr(key, fallback string) string {
@@ -63,9 +78,11 @@ func defaultSocket() string {
 // goes over the socket and falls back to the CLI until socket parity is
 // proven.
 func (c *Client) PaneLines(ctx context.Context, pane string) ([]string, error) {
-	if text, err := c.paneLinesSocket(ctx, pane); err == nil {
+	text, err := c.paneLinesSocket(ctx, pane)
+	if err == nil {
 		return text, nil
 	}
+	c.fellBack("pane.read", err)
 	out, err := c.run(ctx, "pane", "read", pane, "--source", SourceVisible)
 	if err != nil {
 		return nil, err
@@ -98,9 +115,11 @@ type Pane struct {
 // falls back to that pane alone when the layout cannot be read. It goes
 // over the socket and falls back to the CLI until socket parity is proven.
 func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]Pane, error) {
-	if panes, err := c.screenPanesSocket(ctx, pane); err == nil {
+	panes, err := c.screenPanesSocket(ctx, pane)
+	if err == nil {
 		return panes, nil
 	}
+	c.fellBack("pane.layout", err)
 	out, err := c.run(ctx, "pane", "layout", "--pane", pane)
 	if err != nil {
 		return []Pane{{ID: pane}}, err
@@ -162,9 +181,11 @@ func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
 // parity is proven.
 func (c *Client) PaneLabels(ctx context.Context, panes []string) (map[string]string, error) {
 	labels := defaultLabels(panes)
-	if listed, err := c.paneLabelsSocket(ctx, labels); err == nil {
+	listed, err := c.paneLabelsSocket(ctx, labels)
+	if err == nil {
 		return listed, nil
 	}
+	c.fellBack("pane.list", err)
 	out, err := c.run(ctx, "pane", "list")
 	if err != nil {
 		return labels, err
@@ -232,9 +253,11 @@ type Scroll struct {
 }
 
 func (c *Client) PaneScroll(ctx context.Context, pane string) (Scroll, error) {
-	if scroll, err := c.paneScrollSocket(ctx, pane); err == nil {
+	scroll, err := c.paneScrollSocket(ctx, pane)
+	if err == nil {
 		return scroll, nil
 	}
+	c.fellBack("pane.get", err)
 	out, err := c.run(ctx, "pane", "get", pane)
 	if err != nil {
 		return Scroll{}, err
