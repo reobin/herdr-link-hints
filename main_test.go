@@ -132,10 +132,12 @@ func TestNarrowOptsFallsBackToListWithoutALayer(t *testing.T) {
 
 // Not parallel: these cases set environment variables.
 func TestFocusedPane(t *testing.T) {
+	discard := slog.New(slog.DiscardHandler)
 	t.Run("active pane wins", func(t *testing.T) {
+		t.Setenv("HERDR_PLUGIN_CONTEXT_JSON", `{"focused_pane_id":"w1:p3"}`)
 		t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
 		t.Setenv("HERDR_PANE_ID", "w1:p2")
-		if got := focusedPane(); got != "w1:p1" {
+		if got := focusedPane(discard); got != "w1:p1" {
 			t.Fatalf("focusedPane() = %q", got)
 		}
 	})
@@ -143,7 +145,7 @@ func TestFocusedPane(t *testing.T) {
 		t.Setenv("HERDR_ACTIVE_PANE_ID", "")
 		t.Setenv("HERDR_PANE_ID", "")
 		t.Setenv("HERDR_PLUGIN_CONTEXT_JSON", `{"focused_pane_id":"w1:p9"}`)
-		if got := focusedPane(); got != "w1:p9" {
+		if got := focusedPane(discard); got != "w1:p9" {
 			t.Fatalf("focusedPane() = %q", got)
 		}
 	})
@@ -151,7 +153,7 @@ func TestFocusedPane(t *testing.T) {
 		t.Setenv("HERDR_ACTIVE_PANE_ID", "")
 		t.Setenv("HERDR_PANE_ID", "")
 		t.Setenv("HERDR_PLUGIN_CONTEXT_JSON", "not json")
-		if got := focusedPane(); got != "" {
+		if got := focusedPane(discard); got != "" {
 			t.Fatalf("focusedPane() = %q", got)
 		}
 	})

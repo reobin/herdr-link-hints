@@ -160,13 +160,13 @@ func pick() int {
 	rows, cols := term.Size()
 	log.Debug("picker pane", "rows", rows, "cols", cols)
 
-	focused := focusedPane()
+	focused := focusedPane(log)
 	if focused == "" {
 		term.Pause("no pane")
 		return exitCancelled
 	}
 
-	client := herdr.New()
+	client := herdr.New(herdr.WithLogger(log))
 	scanning := term.Spin("scanning")
 	panes, err := client.ScreenPanes(ctx, focused)
 	if err != nil {
@@ -254,20 +254,31 @@ func pick() int {
 }
 
 // focusedPane reads the env vars Herdr sets for the common case, then the
-// JSON context blob for the rest.
-func focusedPane() string {
-	for _, key := range []string{"HERDR_ACTIVE_PANE_ID", "HERDR_PANE_ID"} {
-		if v := os.Getenv(key); v != "" {
-			return v
-		}
-	}
+// JSON context blob for the rest. The order is unchanged on purpose: the
+// context blob is the authoritative answer in a pane process only if
+// HERDR_PANE_ID there is the picker popup's own id, and nobody has observed
+// that it is. Every candidate is logged so the next debug run settles it.
+func focusedPane(log *slog.Logger) string {
 	var pluginContext struct {
 		FocusedPaneID string `json:"focused_pane_id"`
 	}
 	if raw := os.Getenv("HERDR_PLUGIN_CONTEXT_JSON"); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &pluginContext)
 	}
-	return pluginContext.FocusedPaneID
+	sources := []struct{ name, value string }{
+		{"HERDR_ACTIVE_PANE_ID", os.Getenv("HERDR_ACTIVE_PANE_ID")},
+		{"HERDR_PANE_ID", os.Getenv("HERDR_PANE_ID")},
+		{"HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id", pluginContext.FocusedPaneID},
+	}
+	chosen, from := "", "none"
+	for _, source := range sources {
+		if chosen == "" && source.value != "" {
+			chosen, from = source.value, source.name
+		}
+		log.Debug("focused pane candidate", "source", source.name, "value", source.value)
+	}
+	log.Debug("focused pane", "pane", chosen, "source", from)
+	return chosen
 }
 
 func envOr(key, fallback string) string {
