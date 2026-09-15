@@ -205,8 +205,9 @@ func (c *Client) paneLabelsSocket(ctx context.Context, labels map[string]string)
 }
 
 type labelPane struct {
-	PaneID string `json:"pane_id"`
-	Label  string `json:"label"`
+	PaneID string      `json:"pane_id"`
+	Label  string      `json:"label"`
+	Scroll scrollState `json:"scroll"`
 }
 
 func fillLabels(labels map[string]string, panes []labelPane) {
@@ -252,6 +253,25 @@ type Scroll struct {
 	ViewportRows int
 }
 
+// PaneScrolls reads every pane's scroll state from one pane.list, rather
+// than a pane.get each. pane.layout carries no scroll at all, so this can
+// run beside it, and it makes the cost flat in pane count.
+func (c *Client) PaneScrolls(ctx context.Context) (map[string]Scroll, error) {
+	var result struct {
+		Panes []labelPane `json:"panes"`
+	}
+	if err := c.call(ctx, "pane.list", map[string]any{}, &result); err != nil {
+		return nil, err
+	}
+	scrolls := make(map[string]Scroll, len(result.Panes))
+	for _, pane := range result.Panes {
+		if pane.PaneID != "" {
+			scrolls[pane.PaneID] = pane.Scroll.scroll()
+		}
+	}
+	return scrolls, nil
+}
+
 func (c *Client) PaneScroll(ctx context.Context, pane string) (Scroll, error) {
 	scroll, err := c.paneScrollSocket(ctx, pane)
 	if err == nil {
@@ -274,12 +294,16 @@ func (c *Client) paneScrollSocket(ctx context.Context, pane string) (Scroll, err
 	if err := c.call(ctx, "pane.get", map[string]any{"pane_id": pane}, &result); err != nil {
 		return Scroll{}, err
 	}
-	return Scroll{Offset: result.Pane.Scroll.MaxOffsetFromBottom, ViewportRows: result.Pane.Scroll.ViewportRows}, nil
+	return result.Pane.Scroll.scroll(), nil
 }
 
 type scrollState struct {
 	MaxOffsetFromBottom int `json:"max_offset_from_bottom"`
 	ViewportRows        int `json:"viewport_rows"`
+}
+
+func (s scrollState) scroll() Scroll {
+	return Scroll{Offset: s.MaxOffsetFromBottom, ViewportRows: s.ViewportRows}
 }
 
 func parsePaneScroll(out []byte) (Scroll, error) {
@@ -293,8 +317,7 @@ func parsePaneScroll(out []byte) (Scroll, error) {
 	if err := json.Unmarshal(out, &payload); err != nil {
 		return Scroll{}, fmt.Errorf("parse pane get: %w", err)
 	}
-	scroll := payload.Result.Pane.Scroll
-	return Scroll{Offset: scroll.MaxOffsetFromBottom, ViewportRows: scroll.ViewportRows}, nil
+	return payload.Result.Pane.Scroll.scroll(), nil
 }
 
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {

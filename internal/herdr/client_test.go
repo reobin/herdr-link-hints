@@ -233,3 +233,38 @@ func TestFallbackLogsTheSocketError(t *testing.T) {
 		t.Fatalf("log = %q, want it to name the failed method", got)
 	}
 }
+
+// One pane.list replaces a pane.get per pane, so the scroll baseline stays
+// one round trip however many panes share the screen.
+func TestPaneScrollsReadsEveryPaneInOneCall(t *testing.T) {
+	t.Parallel()
+	calls := make(chan map[string]any, 4)
+	socket := fakeServer(t, func(request map[string]any) [][]byte {
+		calls <- request
+		return [][]byte{mustJSON(t, map[string]any{
+			"id": request["id"],
+			"result": map[string]any{"panes": []any{
+				map[string]any{"pane_id": "w1:p1", "scroll": map[string]any{"max_offset_from_bottom": 12, "viewport_rows": 57}},
+				map[string]any{"pane_id": "w1:p2", "scroll": map[string]any{"max_offset_from_bottom": 0, "viewport_rows": 20}},
+			}},
+		})}
+	})
+
+	got, err := New(WithSocket(socket)).PaneScrolls(context.Background())
+	if err != nil {
+		t.Fatalf("PaneScrolls: %v", err)
+	}
+	want := map[string]Scroll{
+		"w1:p1": {Offset: 12, ViewportRows: 57},
+		"w1:p2": {Offset: 0, ViewportRows: 20},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("PaneScrolls() = %+v, want %+v", got, want)
+	}
+	if request := <-calls; request["method"] != "pane.list" {
+		t.Fatalf("method = %v, want pane.list", request["method"])
+	}
+	if len(calls) != 0 {
+		t.Fatalf("%d extra calls, want one for every pane", len(calls))
+	}
+}

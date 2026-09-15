@@ -168,14 +168,35 @@ func pick() int {
 
 	client := herdr.New(herdr.WithLogger(log))
 	scanning := term.Spin("scanning")
-	panes, err := client.ScreenPanes(ctx, focused)
-	if err != nil {
-		log.Debug("pane layout failed", "pane", focused, "error", err)
-	}
+	// pane.list carries every pane's scroll and pane.layout carries none,
+	// so the two run together and the scroll cost stays flat in pane count.
+	// Both must precede the snapshot they are the baseline for: sampled
+	// after, the scroll under-counts growth and Locate returns an
+	// unverified row.
+	var (
+		panes   []herdr.Pane
+		listed  map[string]herdr.Scroll
+		layoutW sync.WaitGroup
+	)
+	layoutW.Add(2)
+	go func() {
+		defer layoutW.Done()
+		var err error
+		if panes, err = client.ScreenPanes(ctx, focused); err != nil {
+			log.Debug("pane layout failed", "pane", focused, "error", err)
+		}
+	}()
+	go func() {
+		defer layoutW.Done()
+		var err error
+		if listed, err = client.PaneScrolls(ctx); err != nil {
+			log.Debug("pane list failed", "error", err)
+		}
+	}()
+	layoutW.Wait()
+
 	ids := paneIDs(panes)
-	// Must precede the snapshot it is the baseline for: sampled after, it
-	// under-counts growth and Locate returns an unverified row.
-	scrolls := paneScrolls(ctx, client, ids, log)
+	scrolls := scrollsFor(ctx, client, ids, listed, log)
 
 	scanner := &scan.Scanner{Source: client, Log: log, SkipObserve: os.Getenv("HINTS_NO_OBSERVE") != ""}
 	scanInput := scanPanes(panes, scrolls)
@@ -364,6 +385,28 @@ func narrowOpts(ctx context.Context, marks *marker, found []links.Link, codes []
 		marks.draw(ctx, hints.Badges(found, codes, matches, typed))
 	}
 	return opts
+}
+
+// scrollsFor takes the batched pane.list answer where it covers every pane
+// and falls back to a pane.get each where it does not.
+func scrollsFor(ctx context.Context, client *herdr.Client, ids []string, listed map[string]herdr.Scroll, log *slog.Logger) map[string]herdr.Scroll {
+	scrolls := make(map[string]herdr.Scroll, len(ids))
+	var missing []string
+	for _, id := range ids {
+		if scroll, ok := listed[id]; ok {
+			scrolls[id] = scroll
+			continue
+		}
+		missing = append(missing, id)
+	}
+	if len(missing) == 0 {
+		return scrolls
+	}
+	log.Debug("pane list missed panes, reading them one by one", "panes", missing)
+	for id, scroll := range paneScrolls(ctx, client, missing, log) {
+		scrolls[id] = scroll
+	}
+	return scrolls
 }
 
 func paneScrolls(ctx context.Context, client *herdr.Client, panes []string, log *slog.Logger) map[string]herdr.Scroll {
