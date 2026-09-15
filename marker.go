@@ -65,6 +65,35 @@ func content(pane herdr.Pane, viewportRows int) overlay.Size {
 	return overlay.Size{Rows: viewportRows, Cols: pane.Width - (pane.Height - viewportRows)}
 }
 
+// adopt takes over a layer another process already put up, so the picker
+// does not re-encode a frame that is on screen and does know to clear it.
+func (m *marker) adopt(panes []string, badges map[string][]overlay.Badge) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, pane := range panes {
+		if _, ok := m.views[pane]; !ok {
+			continue
+		}
+		m.drawn[pane] = true
+		m.shown[pane] = slices.Clone(badges[pane])
+	}
+}
+
+// drawnPanes names the panes with a layer up, for a process handing the
+// picker over to another one.
+func (m *marker) drawnPanes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	panes := make([]string, 0, len(m.drawn))
+	for pane, up := range m.drawn {
+		if up {
+			panes = append(panes, pane)
+		}
+	}
+	slices.Sort(panes)
+	return panes
+}
+
 // live reports whether there is anywhere to draw.
 func (m *marker) live() bool { return m != nil && len(m.views) > 0 }
 
