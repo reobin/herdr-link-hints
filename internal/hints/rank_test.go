@@ -80,3 +80,19 @@ func TestRankLeavesTheInputAlone(t *testing.T) {
 		t.Fatalf("Rank() reordered its input: %+v", rankedURLs(found))
 	}
 }
+
+// Short codes go to likely targets, not document order: the focused pane
+// wins over a nearer cursor elsewhere, and nearness wins over recency.
+func TestRankOrdersLikelyTargetsBeforeDocumentOrder(t *testing.T) {
+	t.Parallel()
+	found := []links.Link{
+		{URL: "https://back-near.io/", Row: 22, Pane: "w1:p2"},
+		{URL: "https://focus-far.io/", Row: 0, Pane: "w1:p1"},
+		{URL: "https://focus-new.io/", Row: 20, Pane: "w1:p1"},
+	}
+	got := rankedURLs(Rank(found, "w1:p1", map[string]int{"w1:p1": 23, "w1:p2": 23}))
+	want := []string{"https://focus-new.io/", "https://focus-far.io/", "https://back-near.io/"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Rank() = %+v, want %+v", got, want)
+	}
+}
