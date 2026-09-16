@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Rebuilds docs/demo.gif: a terminal window showing the synthetic demo pane, a
-# keypress, hints easing in over the dimmed text, the typed code narrowing
+# keypress, hints easing in over the pane, the typed code narrowing
 # them to one, and the pick opening. Every layer
 # is rendered at the gif's own resolution, so nothing is upscaled: the
 # pane text with ImageMagick, the hints by the plugin's own renderer
@@ -257,7 +257,7 @@ window
 keycap prefix "prefix + f"
 keycap code "$CODE0"
 caption links "six links on screen"
-caption hints "every link gets a hint code, the rest dims"
+caption hints "every link gets a hint code"
 caption typed "type the code"
 caption opened "opened $URL0"
 render
