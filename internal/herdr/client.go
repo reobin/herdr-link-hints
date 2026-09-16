@@ -1,10 +1,9 @@
 // Package herdr talks to a running Herdr server over the control socket,
 // dialling fresh for each call: the server reads one request line, answers
 // it and closes, so a connection cannot carry a second call. It falls back
-// to the CLI for pane inspection until
-// socket parity is proven. ObserveOSC8 stays on the CLI: no live OSC 8
-// sample exists to prove a socket snapshot carries the same targets at
-// the same cells.
+// to the CLI for pane inspection until socket parity is proven. ObserveOSC8
+// stays on the CLI: no live OSC 8 sample exists to prove a socket snapshot
+// carries the same targets at the same cells.
 package herdr
 
 import (
