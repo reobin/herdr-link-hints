@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"slices"
 
 	"github.com/reobin/herdr-link-hints/internal/theme"
 )
@@ -161,33 +162,116 @@ type Frame struct {
 	Cols   int
 }
 
-// Render covers the whole viewport, badges or not: the scrim has to reach
-// everywhere the links do not.
-func Render(s Scene) (Frame, error) {
+// Plan is every badge resolved to the cells it will be drawn in. The
+// placement depends only on where the links are, never on which of them a
+// typed prefix still matches, so the whole-viewport frame and the
+// per-badge layers drawn from one plan agree on where every badge sits,
+// and a code goes on meaning the same link while the user narrows.
+type Plan struct {
+	placed   []placement
+	cell     Cell
+	viewport Size
+	palette  color.Palette
+	links    []Badge
+}
+
+func NewPlan(s Scene) (Plan, error) {
 	if s.Cell.Width <= 0 || s.Cell.Height <= 0 {
-		return Frame{}, fmt.Errorf("cell size %dx%d", s.Cell.Width, s.Cell.Height)
+		return Plan{}, fmt.Errorf("cell size %dx%d", s.Cell.Width, s.Cell.Height)
 	}
 	if s.Viewport.Cols <= 0 || s.Viewport.Rows <= 0 {
-		return Frame{}, fmt.Errorf("viewport %dx%d", s.Viewport.Cols, s.Viewport.Rows)
+		return Plan{}, fmt.Errorf("viewport %dx%d", s.Viewport.Cols, s.Viewport.Rows)
 	}
-	placed := clip(s.Badges, s.Viewport)
+	return Plan{
+		placed:   clip(s.Badges, s.Viewport),
+		cell:     s.Cell,
+		viewport: s.Viewport,
+		palette:  newPalette(s.Colors),
+		links:    slices.Clone(s.Badges),
+	}, nil
+}
+
+// Placed is how many badges the plan found room for. A badge the viewport
+// could not hold is not one of them.
+func (p Plan) Placed() int { return len(p.placed) }
+
+// Link is the index into the badge slice the i-th placed badge came from.
+func (p Plan) Link(i int) int { return p.placed[i].source }
+
+// SameLinks reports whether badges mark the same links, in the same order,
+// as the ones this plan placed. Only Dim and Typed may differ. A plan
+// reused against anything else would draw a code that has already been
+// shown against one link on top of another, so a caller that gets false
+// builds a new plan instead.
+func (p Plan) SameLinks(badges []Badge) bool {
+	if len(badges) != len(p.links) {
+		return false
+	}
+	for i, b := range badges {
+		was := p.links[i]
+		if was.Row != b.Row || was.Col != b.Col || was.Before != b.Before ||
+			was.Width != b.Width || was.Code != b.Code {
+			return false
+		}
+	}
+	return true
+}
+
+// Frame covers the whole viewport, badges or not: the scrim has to reach
+// everywhere the links do not.
+func (p Plan) Frame(badges []Badge) (Frame, error) {
 	img := image.NewPaletted(
-		image.Rect(0, 0, s.Viewport.Cols*s.Cell.Width, s.Viewport.Rows*s.Cell.Height),
-		newPalette(s.Colors),
+		image.Rect(0, 0, p.viewport.Cols*p.cell.Width, p.viewport.Rows*p.cell.Height),
+		p.palette,
 	)
 	fill(img, img.Rect, colorScrim)
 	// Ruled-out links stay readable: the screen must not rearrange while you
 	// narrow.
-	for _, p := range placed {
-		fill(img, cellRect(p.linkRow, p.linkCol, p.width, 1, s.Cell), colorHole)
+	for _, pl := range p.placed {
+		fill(img, cellRect(pl.linkRow, pl.linkCol, pl.width, 1, p.cell), colorHole)
 	}
-	for _, p := range placed {
-		underline(img, p, s.Cell)
+	for _, pl := range p.placed {
+		dim, _ := p.stateOf(badges, pl)
+		underline(img, pl, p.cell, dim)
 	}
-	for _, p := range placed {
-		drawBadge(img, p, s.Cell)
+	for _, pl := range p.placed {
+		dim, typed := p.stateOf(badges, pl)
+		drawBadge(img, pl, p.cell, dim, typed)
 	}
+	return p.encode(img, 0, 0, p.viewport.Rows, p.viewport.Cols)
+}
 
+// Layer draws one placed badge and its link rule into the smallest image
+// that covers both, transparent everywhere else, so redrawing a badge
+// costs its own few thousand pixels rather than the viewport's twelve
+// million. The image is at the pane's real cell size: Herdr scales a layer
+// to the cells it declares and the terminal upscales with a linear filter,
+// so anything smaller would smear the badge's edges across a cell.
+func (p Plan) Layer(i int, badges []Badge) (Frame, error) {
+	pl := p.placed[i]
+	row := min(pl.row, pl.linkRow)
+	col := min(pl.col, pl.linkCol)
+	rows := max(pl.row, pl.linkRow) + 1 - row
+	cols := max(pl.col+len(pl.code), pl.linkCol+pl.width) - col
+	img := image.NewPaletted(cellRect(row, col, cols, rows, p.cell), p.palette)
+	dim, typed := p.stateOf(badges, pl)
+	underline(img, pl, p.cell, dim)
+	drawBadge(img, pl, p.cell, dim, typed)
+	return p.encode(img, row, col, rows, cols)
+}
+
+// stateOf is how the badge a placement came from is drawn now. Badges the
+// plan has outlived leave it matched and untyped rather than failing: the
+// caller checks SameLinks when it matters.
+func (p Plan) stateOf(badges []Badge, pl placement) (dim bool, typed int) {
+	if pl.source < 0 || pl.source >= len(badges) {
+		return false, 0
+	}
+	b := badges[pl.source]
+	return b.Dim, min(max(b.Typed, 0), len(pl.code))
+}
+
+func (p Plan) encode(img *image.Paletted, row, col, rows, cols int) (Frame, error) {
 	var buf bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
 	if err := encoder.Encode(&buf, img); err != nil {
@@ -200,9 +284,21 @@ func Render(s Scene) (Frame, error) {
 		PNG:    buf.Bytes(),
 		Width:  img.Rect.Dx(),
 		Height: img.Rect.Dy(),
-		Rows:   s.Viewport.Rows,
-		Cols:   s.Viewport.Cols,
+		Row:    row,
+		Col:    col,
+		Rows:   rows,
+		Cols:   cols,
 	}, nil
+}
+
+// Render is the whole viewport in one frame, for a caller with no reason
+// to keep the plan.
+func Render(s Scene) (Frame, error) {
+	plan, err := NewPlan(s)
+	if err != nil {
+		return Frame{}, err
+	}
+	return plan.Frame(s.Badges)
 }
 
 // checkSize guards the cap here rather than letting the RPC fail with less
@@ -215,7 +311,9 @@ func checkSize(n int) error {
 }
 
 // placement is a badge resolved to cells: row and col are the hint, link*
-// its link.
+// its link, source the badge it came from. Whether the badge is dimmed or
+// part-typed is not here on purpose - that changes on every keystroke and
+// the placement must not.
 type placement struct {
 	row     int
 	col     int
@@ -223,8 +321,7 @@ type placement struct {
 	linkRow int
 	linkCol int
 	width   int
-	dim     bool
-	typed   int
+	source  int
 }
 
 type point struct {
@@ -238,7 +335,7 @@ type point struct {
 func clip(badges []Badge, viewport Size) []placement {
 	taken := linkCells(badges, viewport)
 	var out []placement
-	for _, b := range badges {
+	for i, b := range badges {
 		if b.Row < 0 || b.Row >= viewport.Rows || b.Col < 0 || b.Col >= viewport.Cols {
 			continue
 		}
@@ -259,8 +356,7 @@ func clip(badges []Badge, viewport Size) []placement {
 			linkRow: b.Row,
 			linkCol: b.Col,
 			width:   min(max(b.Width, 1), viewport.Cols-b.Col),
-			dim:     b.Dim,
-			typed:   min(max(b.Typed, 0), len(code)),
+			source:  i,
 		})
 	}
 	return out
@@ -347,30 +443,30 @@ func free(taken map[point]bool, at point, width int) bool {
 }
 
 // underline ties a badge to its link however far apart they were placed.
-func underline(img *image.Paletted, p placement, cell Cell) {
+func underline(img *image.Paletted, p placement, cell Cell, dim bool) {
 	rule := cellRect(p.linkRow, p.linkCol, p.width, 1, cell)
 	rule.Min.Y = rule.Max.Y - underlineHeight
-	fill(img, rule, badgeColor(p.dim, colorBorder, colorDimBorder))
+	fill(img, rule, badgeColor(dim, colorBorder, colorDimBorder))
 }
 
-func drawBadge(img *image.Paletted, p placement, cell Cell) {
+func drawBadge(img *image.Paletted, p placement, cell Cell, dim bool, typed int) {
 	box := cellRect(p.row, p.col, len(p.code), 1, cell)
-	fill(img, box, badgeColor(p.dim, colorBackground, colorDimBackground))
+	fill(img, box, badgeColor(dim, colorBackground, colorDimBackground))
 	// The typed prefix reads as already entered: its cells are inverted
 	// against the rest of the badge, reusing the badge's own colours so no
 	// new palette entry is needed.
-	for i := 0; i < p.typed; i++ {
+	for i := 0; i < typed; i++ {
 		fill(img, cellRect(p.row, p.col+i, 1, 1, cell),
-			badgeColor(p.dim, colorText, colorDimText))
+			badgeColor(dim, colorText, colorDimText))
 	}
-	outline(img, box, badgeColor(p.dim, colorBorder, colorDimBorder))
+	outline(img, box, badgeColor(dim, colorBorder, colorDimBorder))
 	for i, r := range p.code {
-		fg := badgeColor(p.dim, colorText, colorDimText)
-		inverted := i < p.typed
+		fg := badgeColor(dim, colorText, colorDimText)
+		inverted := i < typed
 		if inverted {
-			fg = badgeColor(p.dim, colorBackground, colorDimBackground)
+			fg = badgeColor(dim, colorBackground, colorDimBackground)
 		}
-		drawGlyph(img, r, box.Min.X+i*cell.Width, box.Min.Y, cell, fg, p.dim, inverted)
+		drawGlyph(img, r, box.Min.X+i*cell.Width, box.Min.Y, cell, fg, dim, inverted)
 	}
 }
 

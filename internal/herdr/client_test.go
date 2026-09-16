@@ -1,8 +1,11 @@
 package herdr
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -212,5 +215,56 @@ func TestSocketFallsBackToCLI(t *testing.T) {
 		t.Fatal("expected an error when both paths fail")
 	} else if scroll != (Scroll{}) {
 		t.Fatalf("PaneScroll() = %+v, want a zero Scroll", scroll)
+	}
+}
+
+// A socket that accepts and never answers burns the whole rpc timeout
+// before the CLI is even tried, so the error it hides has to reach the log.
+func TestFallbackLogsTheSocketError(t *testing.T) {
+	t.Parallel()
+	var logged bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	client := New(WithSocket(socketPath(t)), WithLogger(log))
+
+	if _, err := client.PaneLines(context.Background(), "w1:p9"); err == nil {
+		t.Fatal("expected an error when both paths fail")
+	}
+	if got := logged.String(); !strings.Contains(got, "pane.read") {
+		t.Fatalf("log = %q, want it to name the failed method", got)
+	}
+}
+
+// One pane.list replaces a pane.get per pane, so the scroll baseline stays
+// one round trip however many panes share the screen.
+func TestPaneScrollsReadsEveryPaneInOneCall(t *testing.T) {
+	t.Parallel()
+	calls := make(chan map[string]any, 4)
+	socket := fakeServer(t, func(request map[string]any) [][]byte {
+		calls <- request
+		return [][]byte{mustJSON(t, map[string]any{
+			"id": request["id"],
+			"result": map[string]any{"panes": []any{
+				map[string]any{"pane_id": "w1:p1", "scroll": map[string]any{"max_offset_from_bottom": 12, "viewport_rows": 57}},
+				map[string]any{"pane_id": "w1:p2", "scroll": map[string]any{"max_offset_from_bottom": 0, "viewport_rows": 20}},
+			}},
+		})}
+	})
+
+	got, err := New(WithSocket(socket)).PaneScrolls(context.Background())
+	if err != nil {
+		t.Fatalf("PaneScrolls: %v", err)
+	}
+	want := map[string]Scroll{
+		"w1:p1": {Offset: 12, ViewportRows: 57},
+		"w1:p2": {Offset: 0, ViewportRows: 20},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("PaneScrolls() = %+v, want %+v", got, want)
+	}
+	if request := <-calls; request["method"] != "pane.list" {
+		t.Fatalf("method = %v, want pane.list", request["method"])
+	}
+	if len(calls) != 0 {
+		t.Fatalf("%d extra calls, want one for every pane", len(calls))
 	}
 }

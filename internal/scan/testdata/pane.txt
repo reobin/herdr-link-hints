@@ -1,0 +1,56 @@
+[react]     92 |   const shouldDisplayServicesSection = !!internetPlan || (!!routerPlan && canManageRouterProductsInClientPortal) || !!televisionPlan;
+[react]     93 |
+[react]   > 94 |   const overrideShowDelinquentModal = localStorage.getItem('hideDelinquentModalOnLoad') === 'true';
+[react]        |                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[react]     95 |   const shouldShowDelinquentAccountModalOnLoad = useMemo(
+[react]     96 |     () =>
+[react]     97 |       !ownAccountDelinquencyLoading &&
+[react]
+[react]  WARNING(ESLint)  Do not use item index in the array as its key. (@eslint-react/no-array-index-key)
+[react]  FILE  /Users/reobin/GitHub/gaiia/client-portal-web-wt/feat/con-3570-change-television-plan/src/pages/services/add-ons/AddOnsOverviewPage.tsx:25:59
+[react]
+[react]     23 |           <AddOnGroupsContainer>
+[react]     24 |             {formattedAddOnGroups.map((addOnGroup, groupIndex) => (
+[react]   > 25 |               <AddOnGroupDetailsCard key={`add-on-group-${groupIndex}`} addOnGroup={addOnGroup} />
+[react]        |                                                           ^^^^^^^^^^
+[react]     26 |             ))}
+[react]     27 |           </AddOnGroupsContainer>
+[react]     28 |         </AsyncPlaceholder>
+[react]
+[react]  WARNING(ESLint)  '@types/react-router' should be listed in the project's dependencies. Run 'pnpm add @types/react-router' to add it (import-x/no-extraneous-dependencies)
+[react]  FILE  /Users/reobin/GitHub/gaiia/client-portal-web-wt/feat/con-3570-change-television-plan/src/pages/services/appointments/AppointmentsOverviewPage.tsx:3:1
+[react]
+[react]     1 | import { isDefined, useQueryParams } from '@oxiotelecom/gaiia-ui-utils';
+[react]     2 | import React, { memo, useEffect } from 'react';
+[react]   > 3 | import { Route, Switch } from 'react-router';
+[react]       | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[react]     4 | import { useHistory } from 'react-router-dom';
+[react]     5 | import { NEXT_ACTION_QUERY_PARAM } from 'domain/authentication/login/loginQueryParams';
+[react]     6 | import { NextAction } from 'domain/authentication/login/nextAction';
+[react]
+[react]  WARNING(ESLint)  '@datadog/browser-rum' should be listed in the project's dependencies. Run 'pnpm add @datadog/browser-rum' to add it (import-x/no-extraneous-dependencies)
+[react]  FILE  /Users/reobin/GitHub/gaiia/client-portal-web-wt/feat/con-3570-change-television-plan/src/utils/errors/addErrorToDatadogRum.ts:1:1
+[react]
+[react]   > 1 | import { datadogRum } from '@datadog/browser-rum';
+[react]       | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[react]     2 | import { LocalStorage } from '@oxiotelecom/gaiia-ui-utils';
+[react]     3 | import { TENANT_ID_HEADER } from 'apolloClient';
+[react]     4 |
+[react]
+[react]  WARNING(ESLint)  Unexpected control character(s) in regular expression: \x01, \x08, \x0b, \x0c, \x0e, \x1f, \x01, \x09, \x0b, \x0c, \x0e, \x01, \x08, \x0b, \x0c, \x0e, \x1f, \x01, \x09, \x0b, \x0
+c, \x0e. (no-control-regex)
+[react]  FILE  /Users/reobin/GitHub/gaiia/client-portal-web-wt/feat/con-3570-change-television-plan/src/utils/regex.ts:4:3
+[react]
+[react]     2 |
+[react]     3 | export const emailRegex =
+[react]   > 4 |   /(?:[\d!#$%&'*+/=?^_`a-z{|}~-]+(?:\.[\d!#$%&'*+/=?^_`a-z{|}~-]+)*|"(?:[\u0001-\u0008\u000B\u000C\u000E-\u001F!\u0023-\u005B\u005D-\u007F]|\\[\u0001-\u0009\u000B\u000C\u000E-\u007F])*")@(
+?:(?:[\da-z](?:[\da-z-]*[\da-z])?\.)+[\da-z](?:[\da-z-]*[\da-z])?|\[(?:(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d{1,2}|[\da-z-]*[\da-z]:(?:[\u0001-\u0008\u000B\u000C\u000E-\u001F\u
+0021-\u007F]|\\[\u0001-\u0009\u000B\u000C\u000E-\u007F])+)])/;
+[react]       |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[react]     5 |
+[react]     6 | /** use this: [,countryCode, areaCode, exchange, subscriberNumber] */
+[react]     7 | export const phoneRegex = /^(?:\+?(\d{1,3}))?[ (.-]*(\d{3})[ ).-]*(\d{3})[ .-]*(\d{4})$/;
+[react]
+[react] [ESLint] Found 0 error and 70 warnings

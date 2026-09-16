@@ -12,7 +12,7 @@ command = ["bash", "install.sh"]
 id = "hints"
 title = "Hint links in focused pane"
 contexts = ["pane"]
-command = ["bash", "hints-open.sh"]
+command = ["./picker", "--open"]
 
 # A title is required, and Herdr draws it on the pane border.
 [[panes]]

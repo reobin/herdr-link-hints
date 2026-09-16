@@ -28,7 +28,7 @@ const (
 
 var (
 	csiPattern  = regexp.MustCompile("\x1b\\[([0-9;?]*)?([A-Za-z])")
-	osc8Pattern = regexp.MustCompile("\x1b\\]8;;([^\x1b\x07]*?)(?:\x1b\\\\|\x07)")
+	osc8Pattern = regexp.MustCompile("\x1b\\]8;[^;]*;([^\x1b\x07]*?)(?:\x1b\\\\|\x07)")
 )
 
 // ParseLinks drops a link whose closing sequence never arrives: without it
