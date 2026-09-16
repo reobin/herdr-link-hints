@@ -43,7 +43,11 @@ const (
 	envPlacement = "HINTS_PLACEMENT"
 
 	// overlayZ puts the hints above anything else a pane may have drawn.
+	// The dim backdrop goes under the frame and the still-matching badges
+	// over it, so the three stack in the order they are drawn in.
 	overlayZ = 1000
+	dimZ     = overlayZ - 1
+	badgeZ   = overlayZ + 1
 )
 
 func main() {
@@ -240,6 +244,11 @@ func pick() int {
 	// Whatever the action process put up stays up: drawing again would
 	// re-encode a frame already on screen.
 	marks.adopt(p.Drawn, firstBadges(found, codes))
+	// The backdrop the first keystroke narrows against is built here, off
+	// the path, while the user is still reading the hints.
+	if marks.live() && len(found) > 0 {
+		go marks.prime(ctx, firstBadges(found, codes))
+	}
 	if len(found) == 0 {
 		// The backdrop still goes up, so an empty screen reads as an answer.
 		if marks.live() {
