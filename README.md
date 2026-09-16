@@ -26,10 +26,10 @@ description = "hint links in focused pane"
 
 ## Use
 
-Press the bound key. Every link on screen is underlined and gets a hint
-code beside it, and the rest of the screen dims. Type the code; hints
-that no longer match fade, and the match opens as soon as it is
-unambiguous. Backspace edits, Enter opens a single match, Esc quits.
+Press the bound key. Every link on screen is boxed and gets a hint code
+beside it. Type the code; hints that no longer match fade, and the
+match opens as soon as it is unambiguous. Backspace edits, Enter opens a
+single match, Esc quits.
 
 A small popup shows how many hints are left, and says `no match` when a
 prefix has ruled them all out.
@@ -48,9 +48,8 @@ echo a | ./picker --demo
 ```
 
 `docs/demo.gif` plays a synthetic session: the pane at rest, a keypress,
-hints easing in over the dimmed text, the typed code narrowing them to
-one, the pick opening. Rebuild it after any
-overlay or demo change:
+hints easing in over the pane, the typed code narrowing them to one, the
+pick opening. Rebuild it after any overlay or demo change:
 
 ```sh
 ./scripts/build-demo-gif.sh
@@ -84,7 +83,7 @@ herdr plugin link /path/to/herdr-link-hints
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `HINTS_WIDTH` | 24 | picker popup width |
+| `HINTS_WIDTH` | 14 | picker popup width |
 | `HINTS_HEIGHT` | 5 | picker popup height |
 | `HINTS_PLACEMENT` | popup | picker pane placement; only popup takes a size |
 | `HINTS_NO_OBSERVE` | unset | skip the observe stream when set |

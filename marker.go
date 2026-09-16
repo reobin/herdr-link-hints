@@ -13,9 +13,9 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
-// dimLayerID names the backdrop: the scrim, every hole, and every badge in
-// its ruled-out state. It sits under the bright frame and under the badge
-// layers, and it never changes while the picker is open.
+// dimLayerID names the backdrop: every badge, and the box around its
+// link, in their ruled-out state. It sits under the bright frame and under
+// the badge layers, and it never changes while the picker is open.
 const dimLayerID = overlay.LayerID + "-dim"
 
 // badgeLayerID names the layer one still-matching badge is drawn in.
@@ -152,17 +152,23 @@ func (m *marker) drawnPanes() []string {
 func (m *marker) live() bool { return m != nil && len(m.views) > 0 }
 
 // prime puts the dim backdrop up under the bright frame that is already on
-// screen: the scrim, every hole, and every badge drawn as though it had
+// screen: every badge and its link box drawn as though the badge had
 // been ruled out. It is what lets a keystroke redraw a handful of small
 // badge layers rather than re-encode the viewport.
 //
 // It is deliberately not on the open path. Encoding it costs about as much
 // as the frame itself, and nothing is waiting on it - the hints are up, and
-// the user has not typed yet. The bright frame covers the whole viewport,
-// so putting this underneath changes nothing on screen.
+// the user has not typed yet. Both frames come off the same plan and so
+// cover the same pixels, and the bright one is opaque, so putting this
+// underneath changes nothing on screen.
 func (m *marker) prime(ctx context.Context, badges map[string][]overlay.Badge) {
 	var wg sync.WaitGroup
 	for pane, view := range m.views {
+		// A pane holding no links has nothing to dim, and the backdrop for
+		// it would be a viewport-sized transparent image.
+		if len(badges[pane]) == 0 {
+			continue
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -270,6 +276,11 @@ func (m *marker) claims(badges map[string][]overlay.Badge) (claims []claim, used
 	defer m.mu.Unlock()
 	for pane := range m.views {
 		marks := m.panes[pane]
+		// A pane with no links to mark and nothing up spends nothing: it
+		// neither claims layers nor holds any to charge against the total.
+		if len(badges[pane]) == 0 && (marks == nil || !marks.frameUp) {
+			continue
+		}
 		// A plan that no longer describes these links would draw a code
 		// against the wrong one. Re-scanning is the only way that happens,
 		// and a whole frame is always correct.
@@ -429,8 +440,12 @@ func (m *marker) drawFrame(ctx context.Context, pane string, view paneView, badg
 	m.mu.Lock()
 	marks := m.marksFor(pane)
 	up := maps.Clone(marks.layers)
+	// Nothing to mark and no frame of ours up: rendering would encode a
+	// viewport of transparent pixels, and setting it would cost a clear at
+	// teardown. A stale frame still gets one, which is what takes it down.
+	blank := len(badges) == 0 && !marks.frameUp
 	m.mu.Unlock()
-	if unchanged && len(up) == 0 {
+	if blank || (unchanged && len(up) == 0) {
 		return
 	}
 

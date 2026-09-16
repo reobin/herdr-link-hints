@@ -144,33 +144,52 @@ func TestRenderCoversTheWholeViewport(t *testing.T) {
 	}
 }
 
-// Everything that is not a link has to be dimmed but still visible.
-func TestRenderDimsEverythingButTheLinks(t *testing.T) {
+// The pane is not dimmed: the overlay draws the badge and its rule and
+// leaves every other pixel, the link's own cells included, untouched.
+func TestRenderLeavesThePaneAlone(t *testing.T) {
 	t.Parallel()
 	_, img := render(t, []Badge{{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as"}}, Size{Cols: 80, Rows: 24})
 
-	x, y := centreOf(20, 40)
-	if a := alphaAt(img, x, y); a == 0 || a == 0xFF {
-		t.Fatalf("plain text at (%d, %d) has alpha %#x; want a partial scrim", x, y, a)
+	for _, at := range []struct{ row, col int }{{20, 40}, {4, 12}, {0, 0}, {4, 20}} {
+		x, y := centreOf(at.row, at.col)
+		if a := alphaAt(img, x, y); a != 0 {
+			t.Fatalf("cell (%d, %d) has alpha %#x; want the pane left clear", at.row, at.col, a)
+		}
 	}
-	x, y = centreOf(4, 12)
-	if a := alphaAt(img, x, y); a != 0 {
-		t.Fatalf("the link at (%d, %d) has alpha %#x; want it left clear", x, y, a)
+	x, y := centreOf(4, 8)
+	if a := alphaAt(img, x, y); a != 0xFF {
+		t.Fatalf("the badge at (%d, %d) has alpha %#x; want it drawn", 4, 8, a)
 	}
 }
 
-func TestRenderUnderlinesTheLink(t *testing.T) {
+// The link is boxed on all four sides, not just underlined: a link a few
+// cells wide gets too little rule to read as marked now that nothing dims.
+func TestRenderBoxesTheLink(t *testing.T) {
 	t.Parallel()
 	_, img := render(t, []Badge{{Row: 4, Col: 10, Before: 4, Width: 6, Code: "as"}}, Size{Cols: 80, Rows: 24})
-	bottom := (4+1)*cell.Height - 1
-	for _, col := range []int{10, 13, 15} {
-		x := col*cell.Width + cell.Width/2
-		if a := alphaAt(img, x, bottom); a != 0xFF {
-			t.Fatalf("no rule under the link at column %d: alpha %#x", col, a)
+	top, bottom := 4*cell.Height, (4+1)*cell.Height-1
+	left, right := 10*cell.Width, 16*cell.Width-1
+	midX, midY := 13*cell.Width+cell.Width/2, 4*cell.Height+cell.Height/2
+
+	for _, edge := range []struct {
+		name string
+		x, y int
+	}{
+		{"top", midX, top},
+		{"bottom", midX, bottom},
+		{"left", left, midY},
+		{"right", right, midY},
+	} {
+		if a := alphaAt(img, edge.x, edge.y); a != 0xFF {
+			t.Fatalf("no %s edge on the link box: alpha %#x", edge.name, a)
 		}
 	}
+	// Hollow, so the link text still reads through it.
+	if a := alphaAt(img, midX, midY); a != 0 {
+		t.Fatalf("the box is filled at its centre: alpha %#x", a)
+	}
 	if a := alphaAt(img, 16*cell.Width+cell.Width/2, bottom); a == 0xFF {
-		t.Fatal("the rule runs past the end of the link")
+		t.Fatal("the box runs past the end of the link")
 	}
 }
 
@@ -202,9 +221,6 @@ func TestRenderFadesARuledOutBadge(t *testing.T) {
 	}
 	if faded == 0 || faded >= bright {
 		t.Fatalf("the ruled-out badge has alpha %#x; want it faded but drawn", faded)
-	}
-	if x, y := centreOf(8, 12); alphaAt(img, x, y) != 0 {
-		t.Fatal("a ruled-out link should stay readable")
 	}
 }
 
@@ -239,7 +255,7 @@ func TestRenderClipsToTheViewport(t *testing.T) {
 		{Row: 2, Col: 200, Width: 4, Code: "sd"}, // right of it
 		{Row: -1, Col: 2, Width: 4, Code: "df"},  // above it
 	}, viewport)
-	if x, y, ok := notScrim(img); ok {
+	if x, y, ok := drawn(img); ok {
 		t.Fatalf("a badge outside the viewport was drawn at (%d, %d)", x, y)
 	}
 }
@@ -248,36 +264,36 @@ func TestRenderSlidesABadgeInAtTheRightEdge(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 80, Rows: 24}
 	_, img := render(t, []Badge{{Row: 3, Col: 79, Before: 0, Width: 1, Code: "as"}}, viewport)
-	// Placed on the row above, slid left so the whole code fits: a code cut
-	// short is the wrong code to type.
-	for _, col := range []int{78, 79} {
-		x, y := centreOf(2, col)
+	// Beside the link, slid left so the whole code fits: a code cut short
+	// is the wrong code to type.
+	for _, col := range []int{77, 78} {
+		x, y := centreOf(3, col)
 		if a := alphaAt(img, x, y); a != 0xFF {
 			t.Fatalf("the badge is not drawn at column %d: alpha %#x", col, a)
 		}
 	}
 }
 
-// Without a badge the scrim is still the whole frame: the pane is taken
-// over either way.
-func TestRenderScrimsAViewportWithoutBadges(t *testing.T) {
+// Without a badge the frame is still the whole viewport - Herdr is given
+// the placement the badges were drawn against - but it draws nothing.
+func TestRenderDrawsNothingWithoutBadges(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 80, Rows: 24}
 	frame, img := render(t, nil, viewport)
 	if frame.Rows != viewport.Rows || frame.Cols != viewport.Cols {
 		t.Fatalf("frame grid = %dx%d; want %dx%d", frame.Rows, frame.Cols, viewport.Rows, viewport.Cols)
 	}
-	if x, y, ok := notScrim(img); ok {
-		t.Fatalf("something other than the scrim is drawn at (%d, %d)", x, y)
+	if x, y, ok := drawn(img); ok {
+		t.Fatalf("something is drawn at (%d, %d)", x, y)
 	}
 }
 
-// notScrim finds the first pixel the scrim does not account for.
-func notScrim(img image.Image) (int, int, bool) {
+// drawn finds the first pixel the overlay put anything on.
+func drawn(img image.Image) (int, int, bool) {
 	bounds := img.Bounds()
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			if alphaAt(img, x, y) != scrimAlpha {
+			if alphaAt(img, x, y) != 0 {
 				return x, y, true
 			}
 		}
@@ -343,8 +359,9 @@ func TestRenderKeepsAFullScreenUnderTheCap(t *testing.T) {
 	}
 }
 
-// Links are usually separated by a single space, so a two-character code
-// cannot use the gutter.
+// A badge stays on its link's row and against its edge, covering a
+// character of the text beside it when the gutter is too narrow. Only a
+// cell another link already holds pushes it off the row.
 func TestPlaceKeepsTheHintOffTheLink(t *testing.T) {
 	t.Parallel()
 	wide := Size{Cols: 80, Rows: 24}
@@ -358,11 +375,11 @@ func TestPlaceKeepsTheHintOffTheLink(t *testing.T) {
 		{"room beside the link", Badge{Row: 5, Col: 10, Before: 4, Code: "as"}, wide, 5, 8},
 		{"exactly enough room", Badge{Row: 5, Col: 10, Before: 2, Code: "as"}, wide, 5, 8},
 		{"one space fits one character", Badge{Row: 5, Col: 10, Before: 1, Code: "a"}, wide, 5, 9},
-		{"one space does not fit two", Badge{Row: 5, Col: 10, Before: 1, Code: "as"}, wide, 4, 10},
-		{"flush against a word", Badge{Row: 5, Col: 10, Before: 0, Code: "a"}, wide, 4, 10},
-		{"the top row falls to the row below", Badge{Row: 0, Col: 10, Before: 0, Code: "as"}, wide, 1, 10},
-		{"the right edge slides the badge in", Badge{Row: 5, Col: 79, Before: 0, Code: "as"}, wide, 4, 78},
-		{"a one-row pane has nowhere to go", Badge{Row: 0, Col: 10, Before: 0, Code: "as"}, Size{Cols: 80, Rows: 1}, 0, 10},
+		{"one space does not fit two", Badge{Row: 5, Col: 10, Before: 1, Code: "as"}, wide, 5, 8},
+		{"flush against a word", Badge{Row: 5, Col: 10, Before: 0, Code: "a"}, wide, 5, 9},
+		{"the top row stays on its row", Badge{Row: 0, Col: 10, Before: 0, Code: "as"}, wide, 0, 8},
+		{"the right edge slides the badge in", Badge{Row: 5, Col: 79, Before: 0, Code: "as"}, wide, 5, 77},
+		{"a one-row pane has nowhere to go", Badge{Row: 0, Col: 10, Before: 0, Code: "as"}, Size{Cols: 80, Rows: 1}, 0, 8},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -456,34 +473,23 @@ func TestEveryDefaultAlphabetLetterHasAGlyph(t *testing.T) {
 	}
 }
 
-// The clear area belongs to the link, not to wherever the badge ended up.
-func TestRenderClearsTheLinkNotTheBadgeCell(t *testing.T) {
-	t.Parallel()
-	// Before is 1 and the code is two characters, so the badge lands on the
-	// row above.
-	_, img := render(t, []Badge{{Row: 6, Col: 20, Before: 1, Width: 4, Code: "as"}}, Size{Cols: 80, Rows: 24})
-	for _, col := range []int{20, 21, 22, 23} {
-		x, y := centreOf(6, col)
-		if a := alphaAt(img, x, y); a != 0 {
-			t.Fatalf("link cell %d has alpha %#x; want it left clear", col, a)
-		}
-	}
-	x, y := centreOf(6, 24)
-	if a := alphaAt(img, x, y); a == 0 {
-		t.Fatalf("the cell past the link was cleared too")
-	}
-}
-
 func TestPlaceAvoidsANeighboursLink(t *testing.T) {
 	t.Parallel()
 	wide := Size{Cols: 80, Rows: 24}
 	above := Badge{Row: 4, Col: 10, Width: 4, Code: "sd"}
 	badge := Badge{Row: 5, Col: 10, Width: 4, Code: "as"}
 	taken := linkCells([]Badge{above, badge}, wide)
-	// The row above holds another link, and covering it would hide the only
+	// Its own row is free, so it takes the cells beside its link rather
+	// than the row above, where covering the neighbour would hide the only
 	// way to select it.
-	if row, col := place(badge, 2, wide, taken); row != 6 || col != 10 {
-		t.Fatalf("place() = %d, %d; want 6, 10", row, col)
+	row, col := place(badge, 2, wide, taken)
+	if row != 5 || col != 8 {
+		t.Fatalf("place() = %d, %d; want 5, 8", row, col)
+	}
+	for c := col; c < col+2; c++ {
+		if taken[point{row, c}] {
+			t.Fatalf("place() = %d, %d, which covers a link cell", row, col)
+		}
 	}
 }
 
@@ -518,18 +524,21 @@ func TestClipPlacesThreeBadgesOnOneRow(t *testing.T) {
 	}
 }
 
-// When the rows directly above and below hold neighbour links, the badge
-// escapes to the second row out rather than overlapping one.
+// With its own row packed either side and the rows directly above and
+// below holding neighbour links, the badge escapes to the second row out
+// rather than overlapping one.
 func TestPlaceReachesTheSecondRow(t *testing.T) {
 	t.Parallel()
 	wide := Size{Cols: 80, Rows: 24}
 	badges := []Badge{
+		{Row: 5, Col: 0, Width: 10, Code: "jk"},
+		{Row: 5, Col: 14, Width: 66, Code: "kl"},
 		{Row: 4, Col: 8, Width: 6, Code: "sd"},
 		{Row: 5, Col: 10, Width: 4, Code: "as"},
 		{Row: 6, Col: 8, Width: 6, Code: "df"},
 	}
 	taken := linkCells(badges, wide)
-	if row, col := place(badges[1], 2, wide, taken); row != 3 || col != 10 {
+	if row, col := place(badges[3], 2, wide, taken); row != 3 || col != 10 {
 		t.Fatalf("place() = %d, %d; want 3, 10", row, col)
 	}
 }
@@ -541,6 +550,9 @@ func TestPlaceShiftsSidewaysWhenAlignedIsTaken(t *testing.T) {
 	wide := Size{Cols: 80, Rows: 24}
 	badge := Badge{Row: 5, Col: 10, Width: 4, Code: "as"}
 	taken := map[point]bool{}
+	for col := range wide.Cols {
+		taken[point{5, col}] = true
+	}
 	for _, row := range []int{3, 4, 6, 7} {
 		taken[point{row, 10}] = true
 		taken[point{row, 11}] = true

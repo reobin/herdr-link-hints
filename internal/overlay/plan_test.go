@@ -98,11 +98,11 @@ func TestLayersCompositeToTheFrame(t *testing.T) {
 	}
 }
 
-// TestLayerCoversTheBadgeAndItsRule pins what a badge layer has to reach:
-// both the hint and the link it underlines, however far place() moved them
-// apart. A layer that covered only the hint would leave the rule dim on a
+// TestLayerCoversTheBadgeAndItsBox pins what a badge layer has to reach:
+// both the hint and the link it boxes, however far place() moved them
+// apart. A layer that covered only the hint would leave the box dim on a
 // link that still matches.
-func TestLayerCoversTheBadgeAndItsRule(t *testing.T) {
+func TestLayerCoversTheBadgeAndItsBox(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 40, Rows: 8}
 	badges := []Badge{{Row: 4, Col: 20, Before: 0, Width: 10, Code: "as"}}
