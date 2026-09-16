@@ -172,8 +172,8 @@ func TestActivateLinkWithoutServer(t *testing.T) {
 	}
 }
 
-// The real server closes the connection after each response, so one
-// client dials once per call instead of holding a connection.
+// The real server answers one request per connection and closes, so a
+// client dials once per call rather than holding a connection open.
 func TestClientDialsPerCall(t *testing.T) {
 	t.Parallel()
 	var conns atomic.Int64
@@ -256,5 +256,26 @@ func TestGraphicsInfosSkipsFailures(t *testing.T) {
 	infos := New(WithSocket(socket)).GraphicsInfos(context.Background(), []string{"w1:p1", "w1:p2"})
 	if len(infos) != 1 || infos["w1:p1"].CellWidthPx != 9 {
 		t.Fatalf("GraphicsInfos() = %+v, want only w1:p1", infos)
+	}
+}
+
+// The request is encoded before the socket is dialled: the server polls for
+// a request line every 100ms, so anything done between connect and write
+// waits out a poll. An encode that cannot succeed must therefore never
+// reach the dial.
+func TestCallEncodesBeforeDialling(t *testing.T) {
+	t.Parallel()
+	var conns atomic.Int64
+	socket := serve(t, &conns, func(request map[string]any) [][]byte {
+		return [][]byte{mustJSON(t, map[string]any{"id": request["id"]})}
+	})
+
+	client := New(WithSocket(socket))
+	err := client.call(context.Background(), "pane.list", map[string]any{"bad": make(chan int)}, nil)
+	if err == nil {
+		t.Fatal("expected an encode error")
+	}
+	if got := conns.Load(); got != 0 {
+		t.Fatalf("dialed %d connections, want 0: the encode ran after the dial", got)
 	}
 }

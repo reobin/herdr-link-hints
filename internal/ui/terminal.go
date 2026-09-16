@@ -206,9 +206,18 @@ func (t *Terminal) Pause(message string) {
 	t.readKey()
 }
 
-// enterRaw runs stty against the real terminal: Go hands a child
-// /dev/null when Stdin is nil, and `stty -g` then fails.
+// enterRaw sets raw mode through termios, and keeps the stty path for any
+// terminal the ioctl will not answer for.
 func enterRaw(tty *os.File) (func(), error) {
+	if restore, err := enterRawIoctl(tty); err == nil {
+		return restore, nil
+	}
+	return enterRawStty(tty)
+}
+
+// enterRawStty runs stty against the real terminal: Go hands a child
+// /dev/null when Stdin is nil, and `stty -g` then fails.
+func enterRawStty(tty *os.File) (func(), error) {
 	saved, err := stty(tty, "-g")
 	if err != nil {
 		return nil, err
@@ -227,6 +236,13 @@ func stty(tty *os.File, args ...string) (string, error) {
 }
 
 func screenSize(tty *os.File) (rows, cols int, ok bool) {
+	if rows, cols, ok := screenSizeIoctl(tty); ok {
+		return rows, cols, true
+	}
+	return screenSizeStty(tty)
+}
+
+func screenSizeStty(tty *os.File) (rows, cols int, ok bool) {
 	out, err := stty(tty, "size")
 	if err != nil {
 		return 0, 0, false

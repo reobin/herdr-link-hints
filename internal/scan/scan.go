@@ -85,12 +85,15 @@ func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
 	// Rejoined here rather than read back from Herdr: asking for unwrapped
 	// scrollback makes Herdr scroll the pane to answer, and the jump is
 	// visible.
+	// One sweep of the URL pattern feeds both the carry check and the link
+	// list; it used to run once for each and again inside guardUnwrap.
+	matches := links.MatchLines(visible)
 	var known map[string]bool
-	if needsUnwrapped(visible) {
-		known = links.Known(strings.Join(unwrap(visible, pane.Cols), "\n"))
-		guardUnwrap(visible, known, pane.Cols)
+	if carried := carries(visible, matches); len(carried) > 0 {
+		known = links.Known(unwrap(visible, pane.Cols))
+		guardUnwrap(carried, known, pane.Cols)
 	}
-	found := links.Merge(visible, links.FromLines(visible, known), hidden)
+	found := links.Merge(visible, links.FromMatches(visible, matches, known), hidden)
 	for i := range found {
 		found[i].Pane = pane.ID
 	}
@@ -98,25 +101,22 @@ func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
 }
 
 // unwrap rejoins the lines the snapshot broke at the pane's edge: a line
-// filled to the last cell is a soft wrap and continues into the next.
-func unwrap(visible []string, cols int) []string {
+// filled to the last cell is a soft wrap and continues into the next. The
+// result is the joined text its only caller wants, built in one buffer
+// rather than by growing a string per line.
+func unwrap(visible []string, cols int) string {
 	if cols <= 0 {
-		return visible
+		return strings.Join(visible, "\n")
 	}
-	var out []string
-	joined := ""
+	var out strings.Builder
 	for _, line := range visible {
-		joined += line
+		out.WriteString(line)
 		if cells.Width(line) >= cols {
 			continue
 		}
-		out = append(out, joined)
-		joined = ""
+		out.WriteByte('\n')
 	}
-	if joined != "" {
-		out = append(out, joined)
-	}
-	return out
+	return out.String()
 }
 
 // guardUnwrap drops a completion only unwrap's own join could vouch for: a
@@ -125,8 +125,8 @@ func unwrap(visible []string, cols int) []string {
 // must not confirm it. Structural wraps carry no such mark and are kept.
 // Only soft-wrapped lines can join, mirroring unwrap, so a short line never
 // nukes an unrelated completion sharing its prefix.
-func guardUnwrap(visible []string, known map[string]bool, cols int) {
-	for _, c := range carries(visible) {
+func guardUnwrap(carried []carry, known map[string]bool, cols int) {
+	for _, c := range carried {
 		if cols <= 0 || cells.Width(c.line) < cols {
 			continue
 		}
@@ -171,26 +171,22 @@ type carry struct {
 	raw  string
 }
 
-func carries(visible []string) []carry {
+// carries mirrors the carry in links.FromLines. It matches on the raw end,
+// not the cleaned one: whether a trailing "." ends a URL or ends a sentence
+// is the very thing only scrollback can settle.
+func carries(visible []string, matches [][]links.Match) []carry {
 	var out []carry
 	for i, line := range visible {
 		if i+1 >= len(visible) {
 			break
 		}
-		for _, m := range links.FindAll(line) {
+		for _, m := range matches[i] {
 			if m.End == len(line) {
 				out = append(out, carry{line: line, next: visible[i+1], raw: m.Raw})
 			}
 		}
 	}
 	return out
-}
-
-// needsUnwrapped mirrors the carry in links.FromLines. It matches on the
-// raw end, not the cleaned one: whether a trailing "." ends a URL or ends
-// a sentence is the very thing only scrollback can settle.
-func needsUnwrapped(visible []string) bool {
-	return len(carries(visible)) > 0
 }
 
 func (s *Scanner) read(ctx context.Context, pane string) []string {

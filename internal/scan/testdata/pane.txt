@@ -1,0 +1,56 @@
+[react]     92 |   const shouldRenderSummary = !!basicPlan || (!!extraPlan && canManageExtrasInDashboard) || !!bundlePlan;
+[react]     93 |
+[react]   > 94 |   const overrideSkipWelcomeDialog = localStorage.getItem('skipWelcomeDialogOnLoad') === 'true';
+[react]        |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[react]     95 |   const shouldShowWelcomeDialogOnLoad = useMemo(
+[react]     96 |     () =>
+[react]     97 |       !ownProfileSummaryLoading &&
+[react]
+[react]  WARNING(ESLint)  Do not use item index in the array as its key. (@eslint-react/no-array-index-key)
+[react]  FILE  /home/dev/projects/web-app/src/pages/catalog/extras/ExtrasOverviewPage.tsx:25:59
+[react]
+[react]     23 |           <ExtraGroupsContainer>
+[react]     24 |             {formattedExtraGroups.map((extraGroup, groupIndex) => (
+[react]   > 25 |               <ExtraGroupDetailsCard key={`extra-group-${groupIndex}`} extraGroup={extraGroup} />
+[react]        |                                                        ^^^^^^^^^^
+[react]     26 |             ))}
+[react]     27 |           </ExtraGroupsContainer>
+[react]     28 |         </AsyncPlaceholder>
+[react]
+[react]  WARNING(ESLint)  '@types/react-router' should be listed in the project's dependencies. Run 'pnpm add @types/react-router' to add it (import-x/no-extraneous-dependencies)
+[react]  FILE  /home/dev/projects/web-app/src/pages/catalog/bookings/BookingsOverviewPage.tsx:3:1
+[react]
+[react]     1 | import { isDefined, useQueryParams } from '@acme/ui-utils';
+[react]     2 | import React, { memo, useEffect } from 'react';
+[react]   > 3 | import { Route, Switch } from 'react-router';
+[react]       | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[react]     4 | import { useHistory } from 'react-router-dom';
+[react]     5 | import { NEXT_STEP_QUERY_PARAM } from 'domain/session/signin/signinQueryParams';
+[react]     6 | import { NextStep } from 'domain/session/signin/nextStep';
+[react]
+[react]  WARNING(ESLint)  '@acme/browser-telemetry' should be listed in the project's dependencies. Run 'pnpm add @acme/browser-telemetry' to add it (import-x/no-extraneous-dependencies)
+[react]  FILE  /home/dev/projects/web-app/src/utils/errors/reportErrorToTelemetry.ts:1:1
+[react]
+[react]   > 1 | import { telemetry } from '@acme/browser-telemetry';
+[react]       | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[react]     2 | import { LocalStorage } from '@acme/ui-utils';
+[react]     3 | import { WORKSPACE_ID_HEADER } from 'apiClient';
+[react]     4 |
+[react]
+[react]  WARNING(ESLint)  Unexpected control character(s) in regular expression: \x01, \x08, \x0b, \x0c, \x0e, \x1f, \x01, \x08, \x0b, \x0c, \x0e, \x1f, \x01, \x08, \x0b, \x0c, \x0e, \x1f, \x01, \x08, \x0
+b, \x0c, \x0e, \x1f. (no-control-regex)
+[react]  FILE  /home/dev/projects/web-app/src/utils/validation.ts:4:3
+[react]
+[react]     2 |
+[react]     3 | export const mailboxPattern =
+[react]   > 4 |  /(?:[\d!#$%&'*+/=?^_`a-z{|}~-]+(?:\.[\d!#$%&'*+/=?^_`a-z{|}~-]+)*|"(?:[\u0001-\u0008\u000B\u000C\u000E-\u001F!\u0023-\u005B\u005D-\u007F]|\\[\u0001-\u0009\u000B\u000C\u000E-\u007F])*")@(?
+:(?:[\da-z](?:[\da-z-]*[\da-z])?\.)+[\da-z](?:[\da-z-]*[\da-z])?|\[(?:(?:25[0-5]|2[0-4]\d|[01]?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d{1,2}|[\da-z-]*[\da-z]:(?:[\u0001-\u0008\u000B\u000C\u000E-\u001F!\u
+0023-\u005B\u005D-\u007F]|\\[\u0001-\u0009\u000B\u000C\u000E-\u007F])+)])/;
+[react]       |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[react]     5 |
+[react]     6 | /** use this: [,countryCode, areaCode, exchange, subscriberNumber] */
+[react]     7 | export const phonePattern = /^(?:\+?(\d{1,3}))?[ (.-]*(\d{3})[ ).-]*(\d{3})[ .-]*(\d{4})$/;
+[react]
+[react]  [ESLint] Found 0 error and 70 warnings

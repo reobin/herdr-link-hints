@@ -45,6 +45,11 @@ func TestParseLinks(t *testing.T) {
 			name:  "unterminated link is dropped",
 			frame: "\x1b[5;5H\x1b]8;;https://e.io/x\x1b\\half",
 		},
+		{
+			name:  "id parameter is not part of the target",
+			frame: "\x1b[1;1H\x1b]8;id=42;https://e.io/i\x1b\\I\x1b]8;id=42;\x1b\\",
+			want:  []Link{{URL: "https://e.io/i", Row: 0, Col: 0, Label: "I"}},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

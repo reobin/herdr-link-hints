@@ -1,9 +1,9 @@
 // Package herdr talks to a running Herdr server over the control socket,
-// dialling fresh for each call: the server closes the connection after
-// each response. It falls back to the CLI for pane inspection until
-// socket parity is proven. ObserveOSC8 stays on the CLI: no live OSC 8
-// sample exists to prove a socket snapshot carries the same targets at
-// the same cells.
+// dialling fresh for each call: the server reads one request line, answers
+// it and closes, so a connection cannot carry a second call. It falls back
+// to the CLI for pane inspection until socket parity is proven. ObserveOSC8
+// stays on the CLI: no live OSC 8 sample exists to prove a socket snapshot
+// carries the same targets at the same cells.
 package herdr
 
 import (
@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,7 @@ type Client struct {
 	socket     string
 	cmdTimeout time.Duration
 	rpcTimeout time.Duration
+	log        *slog.Logger
 }
 
 func New(opts ...Option) *Client {
@@ -37,11 +39,24 @@ func New(opts ...Option) *Client {
 		socket:     envOr("HERDR_SOCKET_PATH", defaultSocket()),
 		cmdTimeout: 15 * time.Second,
 		rpcTimeout: 5 * time.Second,
+		log:        slog.New(slog.DiscardHandler),
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	// The shim that resolves a bare name costs 100ms a call, against 6ms
+	// for the binary it ends up running.
+	if os.Getenv("HERDR_BIN_PATH") == "" {
+		c.log.Debug("HERDR_BIN_PATH unset, resolving herdr through PATH", "bin", c.bin)
+	}
 	return c
+}
+
+// fellBack records a socket error the CLI is about to paper over. A dial
+// refused returns at once, but a server that accepts and goes quiet costs
+// the full rpc timeout here and the command timeout again below.
+func (c *Client) fellBack(method string, err error) {
+	c.log.Debug("socket call failed, falling back to the CLI", "method", method, "error", err)
 }
 
 func envOr(key, fallback string) string {
@@ -63,9 +78,11 @@ func defaultSocket() string {
 // goes over the socket and falls back to the CLI until socket parity is
 // proven.
 func (c *Client) PaneLines(ctx context.Context, pane string) ([]string, error) {
-	if text, err := c.paneLinesSocket(ctx, pane); err == nil {
+	text, err := c.paneLinesSocket(ctx, pane)
+	if err == nil {
 		return text, nil
 	}
+	c.fellBack("pane.read", err)
 	out, err := c.run(ctx, "pane", "read", pane, "--source", SourceVisible)
 	if err != nil {
 		return nil, err
@@ -98,9 +115,11 @@ type Pane struct {
 // falls back to that pane alone when the layout cannot be read. It goes
 // over the socket and falls back to the CLI until socket parity is proven.
 func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]Pane, error) {
-	if panes, err := c.screenPanesSocket(ctx, pane); err == nil {
+	panes, err := c.screenPanesSocket(ctx, pane)
+	if err == nil {
 		return panes, nil
 	}
+	c.fellBack("pane.layout", err)
 	out, err := c.run(ctx, "pane", "layout", "--pane", pane)
 	if err != nil {
 		return []Pane{{ID: pane}}, err
@@ -162,9 +181,11 @@ func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
 // parity is proven.
 func (c *Client) PaneLabels(ctx context.Context, panes []string) (map[string]string, error) {
 	labels := defaultLabels(panes)
-	if listed, err := c.paneLabelsSocket(ctx, labels); err == nil {
+	listed, err := c.paneLabelsSocket(ctx, labels)
+	if err == nil {
 		return listed, nil
 	}
+	c.fellBack("pane.list", err)
 	out, err := c.run(ctx, "pane", "list")
 	if err != nil {
 		return labels, err
@@ -184,8 +205,9 @@ func (c *Client) paneLabelsSocket(ctx context.Context, labels map[string]string)
 }
 
 type labelPane struct {
-	PaneID string `json:"pane_id"`
-	Label  string `json:"label"`
+	PaneID string      `json:"pane_id"`
+	Label  string      `json:"label"`
+	Scroll scrollState `json:"scroll"`
 }
 
 func fillLabels(labels map[string]string, panes []labelPane) {
@@ -231,10 +253,31 @@ type Scroll struct {
 	ViewportRows int
 }
 
+// PaneScrolls reads every pane's scroll state from one pane.list, rather
+// than a pane.get each. pane.layout carries no scroll at all, so this can
+// run beside it, and it makes the cost flat in pane count.
+func (c *Client) PaneScrolls(ctx context.Context) (map[string]Scroll, error) {
+	var result struct {
+		Panes []labelPane `json:"panes"`
+	}
+	if err := c.call(ctx, "pane.list", map[string]any{}, &result); err != nil {
+		return nil, err
+	}
+	scrolls := make(map[string]Scroll, len(result.Panes))
+	for _, pane := range result.Panes {
+		if pane.PaneID != "" {
+			scrolls[pane.PaneID] = pane.Scroll.scroll()
+		}
+	}
+	return scrolls, nil
+}
+
 func (c *Client) PaneScroll(ctx context.Context, pane string) (Scroll, error) {
-	if scroll, err := c.paneScrollSocket(ctx, pane); err == nil {
+	scroll, err := c.paneScrollSocket(ctx, pane)
+	if err == nil {
 		return scroll, nil
 	}
+	c.fellBack("pane.get", err)
 	out, err := c.run(ctx, "pane", "get", pane)
 	if err != nil {
 		return Scroll{}, err
@@ -251,12 +294,16 @@ func (c *Client) paneScrollSocket(ctx context.Context, pane string) (Scroll, err
 	if err := c.call(ctx, "pane.get", map[string]any{"pane_id": pane}, &result); err != nil {
 		return Scroll{}, err
 	}
-	return Scroll{Offset: result.Pane.Scroll.MaxOffsetFromBottom, ViewportRows: result.Pane.Scroll.ViewportRows}, nil
+	return result.Pane.Scroll.scroll(), nil
 }
 
 type scrollState struct {
 	MaxOffsetFromBottom int `json:"max_offset_from_bottom"`
 	ViewportRows        int `json:"viewport_rows"`
+}
+
+func (s scrollState) scroll() Scroll {
+	return Scroll{Offset: s.MaxOffsetFromBottom, ViewportRows: s.ViewportRows}
 }
 
 func parsePaneScroll(out []byte) (Scroll, error) {
@@ -270,8 +317,7 @@ func parsePaneScroll(out []byte) (Scroll, error) {
 	if err := json.Unmarshal(out, &payload); err != nil {
 		return Scroll{}, fmt.Errorf("parse pane get: %w", err)
 	}
-	scroll := payload.Result.Pane.Scroll
-	return Scroll{Offset: scroll.MaxOffsetFromBottom, ViewportRows: scroll.ViewportRows}, nil
+	return payload.Result.Pane.Scroll.scroll(), nil
 }
 
 func (c *Client) run(ctx context.Context, args ...string) ([]byte, error) {

@@ -110,9 +110,26 @@ func Known(text string) map[string]bool {
 	return known
 }
 
+// MatchLines runs the URL pattern over each line once, so callers that
+// need the matches more than once do not pay for the sweep again.
+func MatchLines(lines []string) [][]Match {
+	matches := make([][]Match, len(lines))
+	for i, line := range lines {
+		matches[i] = FindAll(line)
+	}
+	return matches
+}
+
 // FromLines carries a URL that runs to the end of a line into the next
 // one, rather than blindly joining whatever follows it.
 func FromLines(lines []string, known map[string]bool) []Visible {
+	return FromMatches(lines, MatchLines(lines), known)
+}
+
+// FromMatches is FromLines over matches already found. A carry makes the
+// next line resume past what the completion consumed, and only then is the
+// line swept again.
+func FromMatches(lines []string, matches [][]Match, known map[string]bool) []Visible {
 	var (
 		out     []Visible
 		carried *Visible
@@ -128,7 +145,11 @@ func FromLines(lines []string, known map[string]bool) []Visible {
 		if skip > len(line) {
 			skip = len(line)
 		}
-		for _, m := range FindAll(line[skip:]) {
+		found := matches[i]
+		if skip > 0 {
+			found = FindAll(line[skip:])
+		}
+		for _, m := range found {
 			start := cells.Column(line, skip+m.Start)
 			if skip+m.End == len(line) && i+1 < len(lines) {
 				carried = &Visible{Match: m.Raw, Row: i, Col: start}

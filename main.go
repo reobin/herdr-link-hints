@@ -23,6 +23,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/links"
 	"github.com/reobin/herdr-link-hints/internal/overlay"
 	"github.com/reobin/herdr-link-hints/internal/scan"
+	"github.com/reobin/herdr-link-hints/internal/theme"
 	"github.com/reobin/herdr-link-hints/internal/ui"
 )
 
@@ -42,7 +43,11 @@ const (
 	envPlacement = "HINTS_PLACEMENT"
 
 	// overlayZ puts the hints above anything else a pane may have drawn.
+	// The dim backdrop goes under the frame and the still-matching badges
+	// over it, so the three stack in the order they are drawn in.
 	overlayZ = 1000
+	dimZ     = overlayZ - 1
+	badgeZ   = overlayZ + 1
 )
 
 func main() {
@@ -59,24 +64,75 @@ func run(args []string) int {
 	return pick()
 }
 
-// open asks Herdr for the picker pane. The pane has a fixed content-sized
-// shape, so opening needs no probe of the focused pane.
+// open does the whole scan and puts the hints up, then asks Herdr for the
+// picker pane last. Nothing on the scan-render-set path needs a terminal,
+// so opening last takes the pane spawn, its Go runtime start and its
+// terminal setup off the wait before hints appear. It also removes the
+// ordering hazard: the pane process cannot race a scan that already
+// finished.
 func open() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	log := newLogger()
+	client := herdr.New(herdr.WithLogger(log))
+	spec := paneFor()
 
-	client := herdr.New()
-	open := paneFor()
-	pane, err := client.OpenPane(ctx, open)
+	marks, ready := prepare(ctx, client, log, spec.Env)
+	pane, err := client.OpenPane(ctx, spec)
 	if err != nil {
-		log.Debug("open picker pane failed", "placement", open.Placement, "error", err)
+		log.Debug("open picker pane failed", "placement", spec.Placement, "error", err)
+		// Nothing will arrive to take the overlay down, so it comes down
+		// here rather than staying on the user's screen.
+		if ready {
+			marks.clear(context.WithoutCancel(ctx))
+		}
 		return exitFailed
 	}
-	log.Debug("picker pane opened", "pane", pane,
-		"placement", open.Placement, "width", open.Width, "height", open.Height)
+	attrs := []any{"placement", spec.Placement, "width", spec.Width, "height", spec.Height}
+	if pane != "" {
+		attrs = append(attrs, "pane", pane)
+	}
+	log.Debug("picker pane opened", attrs...)
 	return exitOK
+}
+
+// prepare scans, draws, and leaves the result where the picker pane will
+// find it. A failure anywhere here is not fatal: the env key simply goes
+// unset and the picker does the work itself, exactly as it used to.
+func prepare(ctx context.Context, client *herdr.Client, log *slog.Logger, env map[string]string) (*marker, bool) {
+	focused := focusedPane(log)
+	if focused == "" {
+		return nil, false
+	}
+	p := gather(ctx, client, log, focused)
+
+	// Terminal.Theme gates its cache read behind having a tty, which this
+	// process has not got, so the cache is read directly. Both processes
+	// inherit TERM_PROGRAM from the server, so they resolve the same key.
+	// On a miss nothing is drawn here and the picker draws after its own
+	// probe, which is why a miss cannot flash the wrong colours.
+	colors, cached := theme.Load(os.Getenv("TERM_PROGRAM"))
+	p.Colors, p.HasColors = colors, cached
+
+	var marks *marker
+	if cached {
+		marks = newMarker(client, log, colors, p.Panes, p.Scrolls, p.Infos)
+		if marks.live() {
+			marks.draw(ctx, firstBadges(p.Found, hints.Codes(len(p.Found), hints.DefaultAlphabet)))
+			p.Drawn = marks.drawnPanes()
+		}
+	} else {
+		log.Debug("theme cache miss, leaving the drawing to the picker pane")
+	}
+
+	path, err := writeHandoff(p)
+	if err != nil {
+		log.Debug("handoff not written, the picker will scan for itself", "error", err)
+		return marks, marks != nil
+	}
+	env[envHandoff] = path
+	return marks, marks != nil
 }
 
 // paneFor picks the placement. Only a popup can be sized, and only a popup
@@ -157,56 +213,42 @@ func pick() int {
 	rows, cols := term.Size()
 	log.Debug("picker pane", "rows", rows, "cols", cols)
 
-	focused := focusedPane()
-	if focused == "" {
-		term.Pause("no pane")
-		return exitCancelled
+	client := herdr.New(herdr.WithLogger(log))
+
+	// The action process has usually done all of this already, and the
+	// hints are on screen before this one started. When it has not, or its
+	// answer is too old to trust, the scan happens here as it always did.
+	p, handed := readHandoff(os.Getenv(envHandoff), log)
+	if !handed {
+		focused := focusedPane(log)
+		if focused == "" {
+			term.Pause("no pane")
+			return exitCancelled
+		}
+		scanning := term.Spin("scanning")
+		p = gather(ctx, client, log, focused)
+		scanning()
 	}
+	log.Debug("picker input", "pane", p.Focused, "links", len(p.Found), "from_action", handed)
 
-	client := herdr.New()
-	scanning := term.Spin("scanning")
-	panes, err := client.ScreenPanes(ctx, focused)
-	if err != nil {
-		log.Debug("pane layout failed", "pane", focused, "error", err)
+	colors := p.Colors
+	if !p.HasColors {
+		colors = term.Theme()
 	}
-	ids := paneIDs(panes)
-	// Must precede the snapshot it is the baseline for: sampled after, it
-	// under-counts growth and Locate returns an unverified row.
-	scrolls := paneScrolls(ctx, client, ids, log)
+	found := p.Found
 
-	scanner := &scan.Scanner{Source: client, Log: log, SkipObserve: os.Getenv("HINTS_NO_OBSERVE") != ""}
-	scanInput := scanPanes(panes, scrolls)
-	// The cursor sits where the prompt does: the viewport's bottom row.
-	// That is also where the newest output is, so nearness to it and
-	// recency pull the same way.
-	cursors := make(map[string]int, len(scanInput))
-	for _, pane := range scanInput {
-		cursors[pane.ID] = pane.Rows - 1
-	}
-	// The graphics infos ride alongside the scan: a serial fetch would sit
-	// on the critical path once the scan stops dominating it.
-	var (
-		infos   map[string]herdr.Graphics
-		scanned []links.Link
-		wg      sync.WaitGroup
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		infos = client.GraphicsInfos(ctx, ids)
-	}()
-	go func() {
-		defer wg.Done()
-		scanned = scanner.Links(ctx, scanInput)
-	}()
-	wg.Wait()
-	scanning()
-
-	found := hints.Rank(scanned, focused, cursors)
-
-	marks := newMarker(client, log, term.Theme(), panes, scrolls, infos)
+	codes := hints.Codes(len(found), hints.DefaultAlphabet)
+	marks := newMarker(client, log, colors, p.Panes, p.Scrolls, p.Infos)
 	// A layer Herdr has accepted outlives the process that set it.
 	defer marks.clear(context.WithoutCancel(ctx))
+	// Whatever the action process put up stays up: drawing again would
+	// re-encode a frame already on screen.
+	marks.adopt(p.Drawn, firstBadges(found, codes))
+	// The backdrop the first keystroke narrows against is built here, off
+	// the path, while the user is still reading the hints.
+	if marks.live() && len(found) > 0 {
+		go marks.prime(ctx, firstBadges(found, codes))
+	}
 	if len(found) == 0 {
 		// The backdrop still goes up, so an empty screen reads as an answer.
 		if marks.live() {
@@ -215,8 +257,6 @@ func pick() int {
 		term.Pause("no links")
 		return exitCancelled
 	}
-
-	codes := hints.Codes(len(found), hints.DefaultAlphabet)
 	opts := narrowOpts(ctx, marks, found, codes)
 
 	index, picked := ui.Pick(term, itemsFor(found, codes), opts)
@@ -225,7 +265,8 @@ func pick() int {
 	}
 	choice := found[index]
 
-	row, col, located := scanner.Locate(ctx, choice, grownBy(ctx, client, choice.Pane, scrolls, log))
+	scanner := &scan.Scanner{Source: client, Log: log}
+	row, col, located := scanner.Locate(ctx, choice, grownBy(ctx, client, choice.Pane, p.Scrolls, log))
 	if !located {
 		term.Pause("scrolled")
 		return exitFailed
@@ -251,20 +292,31 @@ func pick() int {
 }
 
 // focusedPane reads the env vars Herdr sets for the common case, then the
-// JSON context blob for the rest.
-func focusedPane() string {
-	for _, key := range []string{"HERDR_ACTIVE_PANE_ID", "HERDR_PANE_ID"} {
-		if v := os.Getenv(key); v != "" {
-			return v
-		}
-	}
+// JSON context blob for the rest. The order is unchanged on purpose: the
+// context blob is the authoritative answer in a pane process only if
+// HERDR_PANE_ID there is the picker popup's own id, and nobody has observed
+// that it is. Every candidate is logged so the next debug run settles it.
+func focusedPane(log *slog.Logger) string {
 	var pluginContext struct {
 		FocusedPaneID string `json:"focused_pane_id"`
 	}
 	if raw := os.Getenv("HERDR_PLUGIN_CONTEXT_JSON"); raw != "" {
 		_ = json.Unmarshal([]byte(raw), &pluginContext)
 	}
-	return pluginContext.FocusedPaneID
+	sources := []struct{ name, value string }{
+		{"HERDR_ACTIVE_PANE_ID", os.Getenv("HERDR_ACTIVE_PANE_ID")},
+		{"HERDR_PANE_ID", os.Getenv("HERDR_PANE_ID")},
+		{"HERDR_PLUGIN_CONTEXT_JSON.focused_pane_id", pluginContext.FocusedPaneID},
+	}
+	chosen, from := "", "none"
+	for _, source := range sources {
+		if chosen == "" && source.value != "" {
+			chosen, from = source.value, source.name
+		}
+		log.Debug("focused pane candidate", "source", source.name, "value", source.value)
+	}
+	log.Debug("focused pane", "pane", chosen, "source", from)
+	return chosen
 }
 
 func envOr(key, fallback string) string {
@@ -341,6 +393,18 @@ func itemsFor(found []links.Link, codes []string) []ui.Item {
 // narrowOpts wires badge redraws while there is somewhere to draw. Without
 // a graphics layer the pick continues as a code list: the count and echo
 // readout needs no overlay.
+// firstBadges is what the picker draws before a key is typed: every hint
+// visible, nothing ruled out. It has to match what ui.Pick asks for on its
+// first pass, or the action process's frame gets replaced by an identical
+// one.
+func firstBadges(found []links.Link, codes []string) map[string][]overlay.Badge {
+	all := make([]int, len(found))
+	for i := range all {
+		all[i] = i
+	}
+	return hints.Badges(found, codes, all, "")
+}
+
 func narrowOpts(ctx context.Context, marks *marker, found []links.Link, codes []string) ui.Options {
 	opts := ui.Options{Alphabet: hints.DefaultAlphabet}
 	if !marks.live() {
@@ -350,6 +414,28 @@ func narrowOpts(ctx context.Context, marks *marker, found []links.Link, codes []
 		marks.draw(ctx, hints.Badges(found, codes, matches, typed))
 	}
 	return opts
+}
+
+// scrollsFor takes the batched pane.list answer where it covers every pane
+// and falls back to a pane.get each where it does not.
+func scrollsFor(ctx context.Context, client *herdr.Client, ids []string, listed map[string]herdr.Scroll, log *slog.Logger) map[string]herdr.Scroll {
+	scrolls := make(map[string]herdr.Scroll, len(ids))
+	var missing []string
+	for _, id := range ids {
+		if scroll, ok := listed[id]; ok {
+			scrolls[id] = scroll
+			continue
+		}
+		missing = append(missing, id)
+	}
+	if len(missing) == 0 {
+		return scrolls
+	}
+	log.Debug("pane list missed panes, reading them one by one", "panes", missing)
+	for id, scroll := range paneScrolls(ctx, client, missing, log) {
+		scrolls[id] = scroll
+	}
+	return scrolls
 }
 
 func paneScrolls(ctx context.Context, client *herdr.Client, panes []string, log *slog.Logger) map[string]herdr.Scroll {
