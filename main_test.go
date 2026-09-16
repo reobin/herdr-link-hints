@@ -209,7 +209,7 @@ func TestPaneShape(t *testing.T) {
 	t.Run("the fixed shape holds the readout", func(t *testing.T) {
 		t.Parallel()
 		width, height := paneShape()
-		if width != "24" || height != "5" {
+		if width != "14" || height != "5" {
 			t.Fatalf("paneShape() = %q, %q", width, height)
 		}
 	})
@@ -235,7 +235,7 @@ func TestPaneShape(t *testing.T) {
 func TestPaneFor(t *testing.T) {
 	t.Run("annotate gets the fixed popup", func(t *testing.T) {
 		got := paneFor()
-		if got.Placement != "popup" || got.Width != "24" || got.Height != "5" {
+		if got.Placement != "popup" || got.Width != "14" || got.Height != "5" {
 			t.Fatalf("paneFor() = %+v", got)
 		}
 	})

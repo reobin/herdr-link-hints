@@ -157,11 +157,12 @@ func paneFor() herdr.PaneOpen {
 }
 
 // contentCols is the fixed content width of the picker popup. The readout's
-// widest lines are the spinner with its label ("⠋ scanning", ten cells)
-// and a three-digit count with its unit ("999 links", nine cells), so 22
-// holds either with room for the centred padding that keeps the left edge
-// still.
-const contentCols = 22
+// widest line is the spinner with its label ("⠋ scanning", ten cells); a
+// three-digit count with its unit ("999 links") is nine. Twelve holds
+// either with a cell of padding, and leaves the border room for the title
+// Herdr draws on it, which is now what the box is sized against rather than
+// the readout.
+const contentCols = 12
 
 // contentRows is the fixed content height of the picker popup. The readout
 // is two rows, the echo above the count, and three content rows centre the
@@ -250,9 +251,12 @@ func pick() int {
 		go marks.prime(ctx, firstBadges(found, codes))
 	}
 	if len(found) == 0 {
-		// The backdrop still goes up, so an empty screen reads as an answer.
+		// Hints another process adopted come down now rather than sitting
+		// there through the pause. Nothing goes up in their place: the frame
+		// no longer dims the pane, so an empty one would be a viewport-sized
+		// transparent image on every pane.
 		if marks.live() {
-			marks.draw(ctx, nil)
+			marks.clear(ctx)
 		}
 		term.Pause("no links")
 		return exitCancelled

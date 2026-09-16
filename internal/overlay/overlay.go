@@ -19,12 +19,18 @@ const LayerID = "link-hints"
 // maxFrameBytes is Herdr's cap on an inline pane.graphics.set frame.
 const maxFrameBytes = 512 << 10
 
-// underlineHeight is the pixels of a cell's bottom the link rule takes.
-const underlineHeight = 2
+// linkStroke is the pixels the box around a link takes on each side.
+const linkStroke = 2
+
+// badgeStroke is the pixels the badge's own outline takes. Lighter than the
+// link box so the two read as a pair rather than one slab where they meet.
+const badgeStroke = 1
 
 const (
-	colorHole uint8 = iota
-	colorScrim
+	// colorClear has to stay first: it is the index an untouched image is
+	// already filled with, and every pixel the overlay does not draw on has
+	// to let the pane through.
+	colorClear uint8 = iota
 	colorBorder
 	colorBackground
 	colorText
@@ -57,9 +63,6 @@ const (
 // as before.
 const smoothScale = 3
 
-// scrimAlpha reads as dimming only because Herdr alpha-blends the layer.
-const scrimAlpha = 0x66
-
 // dimAlpha is how far a ruled-out hint fades.
 const dimAlpha = 0xB0
 
@@ -75,8 +78,7 @@ func newPalette(c theme.Colors) color.Palette {
 	dimBackground := theme.Fade(theme.Mix(accent, c.Background, 0.55), dimAlpha)
 	dimText := theme.Fade(c.Background, dimAlpha)
 	palette := make(color.Palette, aaBase+aaPairs*aaLevels)
-	palette[colorHole] = color.RGBA{}
-	palette[colorScrim] = theme.Fade(c.Background, scrimAlpha)
+	palette[colorClear] = color.RGBA{}
 	palette[colorBorder] = theme.Mix(accent, c.Background, 0.45)
 	palette[colorBackground] = background
 	palette[colorText] = text
@@ -217,22 +219,17 @@ func (p Plan) SameLinks(badges []Badge) bool {
 	return true
 }
 
-// Frame covers the whole viewport, badges or not: the scrim has to reach
-// everywhere the links do not.
+// Frame is the whole viewport in one image: clear everywhere the badges and
+// their link boxes are not, so the pane reads exactly as it did before the
+// hints went up.
 func (p Plan) Frame(badges []Badge) (Frame, error) {
 	img := image.NewPaletted(
 		image.Rect(0, 0, p.viewport.Cols*p.cell.Width, p.viewport.Rows*p.cell.Height),
 		p.palette,
 	)
-	fill(img, img.Rect, colorScrim)
-	// Ruled-out links stay readable: the screen must not rearrange while you
-	// narrow.
-	for _, pl := range p.placed {
-		fill(img, cellRect(pl.linkRow, pl.linkCol, pl.width, 1, p.cell), colorHole)
-	}
 	for _, pl := range p.placed {
 		dim, _ := p.stateOf(badges, pl)
-		underline(img, pl, p.cell, dim)
+		boxLink(img, pl, p.cell, dim)
 	}
 	for _, pl := range p.placed {
 		dim, typed := p.stateOf(badges, pl)
@@ -241,7 +238,7 @@ func (p Plan) Frame(badges []Badge) (Frame, error) {
 	return p.encode(img, 0, 0, p.viewport.Rows, p.viewport.Cols)
 }
 
-// Layer draws one placed badge and its link rule into the smallest image
+// Layer draws one placed badge and its link box into the smallest image
 // that covers both, transparent everywhere else, so redrawing a badge
 // costs its own few thousand pixels rather than the viewport's twelve
 // million. The image is at the pane's real cell size: Herdr scales a layer
@@ -255,7 +252,7 @@ func (p Plan) Layer(i int, badges []Badge) (Frame, error) {
 	cols := max(pl.col+len(pl.code), pl.linkCol+pl.width) - col
 	img := image.NewPaletted(cellRect(row, col, cols, rows, p.cell), p.palette)
 	dim, typed := p.stateOf(badges, pl)
-	underline(img, pl, p.cell, dim)
+	boxLink(img, pl, p.cell, dim)
 	drawBadge(img, pl, p.cell, dim, typed)
 	return p.encode(img, row, col, rows, cols)
 }
@@ -377,22 +374,16 @@ func linkCells(badges []Badge, viewport Size) map[point]bool {
 	return taken
 }
 
-// place keeps a hint off every link, not just the one it marks. It walks
-// outward from the link: the gutter beside it first, then the rows above
-// and below out to two away, trying the aligned column before a few
-// columns either side, and the link's own row last. Covering one is the
-// defensive last resort, unreachable in a realistic pane: the walk finds
-// a free cell long before it runs out.
+// place keeps a hint off every link, not just the one it marks. The link's
+// own row comes first, flush against the link and working outward: a badge
+// against its link reads as belonging to it, and hiding a character of the
+// text beside it costs less than floating a row away from the box. Only
+// then the rows above and below, out to two away. Covering a link is the defensive last resort,
+// unreachable in a realistic pane: the walk finds a free cell long before
+// it runs out.
 func place(b Badge, width int, viewport Size, taken map[point]bool) (row, col int) {
 	fallback := point{b.Row, fit(b.Col, width, viewport.Cols)}
 	seen := map[point]bool{}
-	if b.Before >= width {
-		left := point{b.Row, b.Col - width}
-		seen[left] = true
-		if free(taken, left, width) {
-			return left.row, left.col
-		}
-	}
 	try := func(s point) (point, bool) {
 		if seen[s] {
 			return point{}, false
@@ -402,6 +393,11 @@ func place(b Badge, width int, viewport Size, taken map[point]bool) (row, col in
 			return s, true
 		}
 		return point{}, false
+	}
+	for _, col := range besideLink(b, width, viewport) {
+		if s, ok := try(point{b.Row, col}); ok {
+			return s.row, s.col
+		}
 	}
 	for _, colOff := range []int{0, -1, 1, -2, 2, -3, 3} {
 		for _, rowOff := range []int{-1, 1, -2, 2} {
@@ -414,12 +410,20 @@ func place(b Badge, width int, viewport Size, taken map[point]bool) (row, col in
 			}
 		}
 	}
-	for _, colOff := range []int{0, -1, 1, -2, 2, -3, 3} {
-		if s, ok := try(point{b.Row, fit(b.Col+colOff, width, viewport.Cols)}); ok {
-			return s.row, s.col
-		}
-	}
 	return fallback.row, fallback.col
+}
+
+// besideLink is where a badge can sit on its link's own row, nearest first:
+// flush against the link on either side, then a cell or two further out.
+// Offsets are whole badge widths, so the badge lands beside the link rather
+// than half over it.
+func besideLink(b Badge, width int, viewport Size) []int {
+	after := b.Col + max(b.Width, 1)
+	cols := []int{b.Col - width, after, b.Col - width - 1, after + 1, b.Col - width - 2, after + 2}
+	for i, col := range cols {
+		cols[i] = fit(col, width, viewport.Cols)
+	}
+	return cols
 }
 
 // fit slides a badge left so its whole code stays inside the pane.
@@ -442,11 +446,12 @@ func free(taken map[point]bool, at point, width int) bool {
 	return true
 }
 
-// underline ties a badge to its link however far apart they were placed.
-func underline(img *image.Paletted, p placement, cell Cell, dim bool) {
-	rule := cellRect(p.linkRow, p.linkCol, p.width, 1, cell)
-	rule.Min.Y = rule.Max.Y - underlineHeight
-	fill(img, rule, badgeColor(dim, colorBorder, colorDimBorder))
+// boxLink ties a badge to its link however far apart they were placed. A box
+// rather than a rule beneath it: nothing dims the pane any more, and a link
+// only a few cells wide gets too little underline to read as marked.
+func boxLink(img *image.Paletted, p placement, cell Cell, dim bool) {
+	outline(img, cellRect(p.linkRow, p.linkCol, p.width, 1, cell),
+		badgeColor(dim, colorBorder, colorDimBorder), linkStroke)
 }
 
 func drawBadge(img *image.Paletted, p placement, cell Cell, dim bool, typed int) {
@@ -459,7 +464,7 @@ func drawBadge(img *image.Paletted, p placement, cell Cell, dim bool, typed int)
 		fill(img, cellRect(p.row, p.col+i, 1, 1, cell),
 			badgeColor(dim, colorText, colorDimText))
 	}
-	outline(img, box, badgeColor(dim, colorBorder, colorDimBorder))
+	outline(img, box, badgeColor(dim, colorBorder, colorDimBorder), badgeStroke)
 	for i, r := range p.code {
 		fg := badgeColor(dim, colorText, colorDimText)
 		inverted := i < typed
@@ -583,9 +588,9 @@ func fill(img *image.Paletted, at image.Rectangle, index uint8) {
 	}
 }
 
-func outline(img *image.Paletted, at image.Rectangle, index uint8) {
-	fill(img, image.Rect(at.Min.X, at.Min.Y, at.Max.X, at.Min.Y+1), index)
-	fill(img, image.Rect(at.Min.X, at.Max.Y-1, at.Max.X, at.Max.Y), index)
-	fill(img, image.Rect(at.Min.X, at.Min.Y, at.Min.X+1, at.Max.Y), index)
-	fill(img, image.Rect(at.Max.X-1, at.Min.Y, at.Max.X, at.Max.Y), index)
+func outline(img *image.Paletted, at image.Rectangle, index uint8, weight int) {
+	fill(img, image.Rect(at.Min.X, at.Min.Y, at.Max.X, at.Min.Y+weight), index)
+	fill(img, image.Rect(at.Min.X, at.Max.Y-weight, at.Max.X, at.Max.Y), index)
+	fill(img, image.Rect(at.Min.X, at.Min.Y, at.Min.X+weight, at.Max.Y), index)
+	fill(img, image.Rect(at.Max.X-weight, at.Min.Y, at.Max.X, at.Max.Y), index)
 }

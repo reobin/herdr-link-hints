@@ -538,3 +538,47 @@ func TestBackdropShows(t *testing.T) {
 		t.Fatal("typed progress on a ruled-out badge is not in the backdrop")
 	}
 }
+
+// TestALinkLessPaneCostsNothing: the frame stopped dimming the pane, so
+// everything a pane with no links on it would have drawn is now a viewport
+// of transparent pixels. Encoding and pushing one per pane is waste on the
+// keystroke path, and the backdrop it leaves behind claims two of Herdr's
+// 64 layers, which can push a pane that does have badges off the layered
+// path and back onto a full re-encode.
+func TestALinkLessPaneCostsNothing(t *testing.T) {
+	t.Parallel()
+	server, socket := startGraphicsServer(t)
+	m := testMarker(t, socket, "w1:p1", "w1:p2")
+	ctx := context.Background()
+
+	badges := testBadges(3)
+	all := map[string][]overlay.Badge{"w1:p1": badges}
+	m.prime(ctx, all)
+	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
+
+	for _, c := range server.seen() {
+		if c.pane == "w1:p2" {
+			t.Fatalf("drew on a pane with no links: %v", server.seen())
+		}
+	}
+	claims, used := m.claims(map[string][]overlay.Badge{"w1:p1": badges})
+	if used != 0 || len(claims) != 1 {
+		t.Fatalf("claims = %+v, used = %d; want the link-less pane to spend nothing", claims, used)
+	}
+}
+
+// A pane another process drew on still has to be cleared when this scan
+// finds no links there, or its frame outlives the hints it was drawn for.
+func TestALinkLessPaneStillClearsAnAdoptedFrame(t *testing.T) {
+	t.Parallel()
+	server, socket := startGraphicsServer(t)
+	m := testMarker(t, socket, "w1:p1")
+	ctx := context.Background()
+
+	m.adopt([]string{"w1:p1"}, map[string][]overlay.Badge{"w1:p1": testBadges(3)})
+	m.draw(ctx, map[string][]overlay.Badge{})
+
+	if sets := server.layerSets(); !slices.Contains(sets, overlay.LayerID) {
+		t.Fatalf("left an adopted frame up: %v", server.seen())
+	}
+}
