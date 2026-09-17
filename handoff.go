@@ -50,8 +50,9 @@ func gather(ctx context.Context, client *herdr.Client, log *slog.Logger, focused
 	// pane.list carries every pane's scroll and pane.layout carries none,
 	// so the two run together and the scroll cost stays flat in pane count.
 	// Both must precede the snapshot they are the baseline for: sampled
-	// after, the scroll under-counts growth and Locate returns an
-	// unverified row.
+	// after, the scroll under-counts growth, so Locate misses the cell it
+	// confirms against and falls back to searching the whole pane, which can
+	// land on another copy of the same link.
 	var (
 		panes   []herdr.Pane
 		listed  map[string]herdr.Scroll

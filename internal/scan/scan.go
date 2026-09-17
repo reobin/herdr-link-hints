@@ -204,6 +204,17 @@ func stillThere(visible []string, choice links.Link, row int) bool {
 		return false
 	}
 	line := visible[row]
+	// A text link is confirmed by the whole URL the cell starts, not by
+	// finding its text there: the picked URL is a prefix of every longer one
+	// sharing it, and a substring match would settle for that instead.
+	if choice.Kind == links.Text {
+		for _, m := range links.FindAll(line) {
+			if cells.Column(line, m.Start) == choice.Col && links.Normalize(m.URL) == choice.URL {
+				return true
+			}
+		}
+		return wrapped(visible, choice, row)
+	}
 	for at := 0; at < len(line); {
 		i := strings.Index(line[at:], choice.Text)
 		if i < 0 {
@@ -217,14 +228,40 @@ func stillThere(visible []string, choice links.Link, row int) bool {
 	return false
 }
 
+// wrapped reports whether choice.Text is on screen as the soft wrap it was
+// read as: the run reaching this line's end at the link's own column, with
+// the rest of it resuming the next line. A URL completed across the edge is
+// never on one line whole, so that pair is all there is to confirm the cell
+// against. A run with nothing under it is a URL that really is that short,
+// which is the rule the scan itself joins by.
+func wrapped(visible []string, choice links.Link, row int) bool {
+	if row+1 >= len(visible) {
+		return false
+	}
+	line, next := visible[row], visible[row+1]
+	if next == "" {
+		return false
+	}
+	// Ranging the string walks rune boundaries: a byte offset inside a rune
+	// measures as a column of its own, which can reach choice.Col before the
+	// boundary that really sits there.
+	for at := range line {
+		run := line[at:]
+		if cells.Column(line, at) != choice.Col || len(run) >= len(choice.Text) || !strings.HasPrefix(choice.Text, run) {
+			continue
+		}
+		rest := choice.Text[len(run):]
+		if strings.HasPrefix(next, rest) || strings.HasPrefix(rest, next) {
+			return true
+		}
+	}
+	return false
+}
+
 // Locate re-resolves a link's cell just before opening it: output may have
 // scrolled while the user was typing.
 func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row, col int, ok bool) {
 	shifted := choice.Row - shift
-	if shift != 0 && shifted >= 0 && choice.Kind == links.Text {
-		return shifted, choice.Col, true
-	}
-
 	visible := s.read(ctx, choice.Pane)
 	// The same anchor can sit in several places, so the cell the hint was
 	// drawn on beats the first match anywhere.
@@ -241,8 +278,10 @@ func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row
 		}
 	}
 	// An OSC 8 target is nowhere in the text, so its anchor is all that is
-	// left to search for.
-	if choice.Text != "" {
+	// left to search for. A text link is its own anchor, so the sweep above
+	// already covers it, and a bare substring search here would settle for a
+	// longer URL that merely contains it.
+	if choice.Kind == links.OSC8 && choice.Text != "" {
 		for i, line := range visible {
 			if at := strings.Index(line, choice.Text); at >= 0 {
 				return i, cells.Column(line, at), true
