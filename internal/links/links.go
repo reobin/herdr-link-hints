@@ -47,12 +47,47 @@ type Match struct {
 	End   int
 }
 
-const trailingPunctuation = `.,;:!?'"`
+const (
+	trailingPunctuation = `.,;:!?'"`
+	// linkChar is what a URL may run over: anything but whitespace, the
+	// characters a shell quotes with, and C0 controls.
+	linkChar = "[^\\s<>\"'`\\\\\x00-\x1f]"
+	// hostLabel is one DNS label, which may not open or close on a hyphen.
+	hostLabel = `[a-z0-9](?:[a-z0-9-]*[a-z0-9])?`
+	// hostNeighbours are the characters that make a token a path, a version
+	// or a field access rather than a host. \b does not rule them out.
+	hostNeighbours = `/.-@:~`
+)
+
+// schemePrefixes mirrors what browse will open. A match starting with one of
+// these, or with www., is trusted as it always was; only the bare-host and ssh
+// shapes pay for the boundary filters.
+var schemePrefixes = []string{"http:", "https:", "ftp:", "file:", "mailto:"}
 
 var (
-	urlPattern  = regexp.MustCompile("(?i)\\b(?:https?|ftp|file|mailto):[^\\s<>\"'`\\\\\x00-\x1f]+|\\bwww\\.[^\\s<>\"'`\\\\\x00-\x1f]+")
-	leadingWord = regexp.MustCompile(`^\S+`)
-	brackets    = []struct{ open, close byte }{{'(', ')'}, {'[', ']'}, {'{', '}'}}
+	// host is a bare host gated on the TLD list: the gate is the only thing
+	// keeping main.go and v1.2.3 off the screen.
+	host = hostLabel + `(?:\.` + hostLabel + `)*\.(?:` + tldAlternation + `)`
+	// scpPath is deliberately owner/repo shaped. It is what keeps an ssh
+	// port out of "git@host:22", keeps "git@host:~/notes" from normalizing
+	// into a URL nobody can open, and lets the branch do without the
+	// lookahead RE2 does not have.
+	scpPath = `[\w.-]+/[\w./-]+`
+
+	urlPattern = regexp.MustCompile(
+		// (?i) here runs to the end of the pattern, so every branch below
+		// is case-insensitive too. www. stays ahead of the bare host so a
+		// www. match keeps the extent it has always had.
+		"(?i)" +
+			`\b(?:https?|ftp|file|mailto):` + linkChar + `+` +
+			`|\b[a-z0-9._-]+@` + host + `:` + scpPath +
+			`|\bwww\.` + linkChar + `+` +
+			`|\b` + host + `\b(?::[0-9]+)?(?:/` + linkChar + `*)?`,
+	)
+	scpAnchored  = regexp.MustCompile(`(?i)^[a-z0-9._-]+@(` + host + `):(` + scpPath + `)$`)
+	hostAnchored = regexp.MustCompile(`(?i)^` + host + `\b(?::[0-9]+)?(?:/` + linkChar + `*)?$`)
+	leadingWord  = regexp.MustCompile(`^\S+`)
+	brackets     = []struct{ open, close byte }{{'(', ')'}, {'[', ']'}, {'{', '}'}}
 )
 
 // Clean keeps a closing bracket the URL opened itself, so targets like
@@ -83,21 +118,94 @@ func unbalanced(url string) bool {
 	return false
 }
 
-// Normalize supplies the scheme a bare www. host leaves out.
+// Normalize supplies the scheme a host leaves out, and rewrites an ssh remote
+// into the https form that is the only one a browser can open. It recognizes
+// a shape or leaves the string alone: Merge and shadowed run it over every OSC
+// 8 target too, and those carry schemes of their own that are none of our
+// business. It is also idempotent, which is what lets Locate compare a freshly
+// read token against a URL normalized a keystroke ago.
 func Normalize(url string) string {
+	if schemed(url) {
+		return url
+	}
 	if strings.HasPrefix(strings.ToLower(url), "www.") {
+		return "https://" + url
+	}
+	if m := scpAnchored.FindStringSubmatch(url); m != nil {
+		return "https://" + m[1] + "/" + strings.TrimSuffix(m[2], ".git")
+	}
+	if hostAnchored.MatchString(url) {
 		return "https://" + url
 	}
 	return url
 }
 
+// schemed keeps a URL that already says where it goes off the host rules. The
+// "://" test cannot be loosened to a bare colon: a host carries one too, in
+// example.com:8080.
+func schemed(url string) bool {
+	return strings.Contains(url, "://") || strings.HasPrefix(strings.ToLower(url), "mailto:")
+}
+
 func FindAll(line string) []Match {
+	return findAll(line, 0)
+}
+
+// findAll sweeps from a byte offset but reads its left context out of the
+// whole line, so a match resuming after a carry is judged by what really
+// precedes it. Offsets stay relative to the sweep, which is what the caller
+// measures columns against.
+func findAll(line string, from int) []Match {
 	var out []Match
-	for _, loc := range urlPattern.FindAllStringIndex(line, -1) {
-		raw := line[loc[0]:loc[1]]
-		out = append(out, Match{URL: Clean(raw), Raw: raw, Start: loc[0], End: loc[1]})
+	for _, loc := range urlPattern.FindAllStringIndex(line[from:], -1) {
+		start, end := from+loc[0], from+loc[1]
+		raw := line[start:end]
+		if needsBoundaries(raw) && !bounded(line, start, end) {
+			continue
+		}
+		out = append(out, Match{URL: Clean(raw), Raw: raw, Start: start - from, End: end - from})
 	}
 	return out
+}
+
+func needsBoundaries(raw string) bool {
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "www.") {
+		return false
+	}
+	for _, scheme := range schemePrefixes {
+		if strings.HasPrefix(lower, scheme) {
+			return false
+		}
+	}
+	return true
+}
+
+// bounded rejects a host that is really part of something else. \b is an ASCII
+// word boundary, which leaves both ends open: on the left it reads the
+// continuation byte of "bücher.de" as a break and matches "cher.de", and on
+// the right it is satisfied by the dot in "java.io.IOException", so the engine
+// settles for the prefix that happens to end in a TLD. A dot followed by a
+// letter is that case; a dot followed by anything else ends a sentence.
+func bounded(line string, start, end int) bool {
+	if start > 0 {
+		before, _ := utf8.DecodeLastRuneInString(line[:start])
+		if wordRune(before) || strings.ContainsRune(hostNeighbours, before) {
+			return false
+		}
+	}
+	if end < len(line) {
+		switch line[end] {
+		case '-':
+			return false
+		case '.':
+			next, _ := utf8.DecodeRuneInString(line[end+1:])
+			if wordRune(next) || next == '_' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Known indexes unwrapped scrollback so a URL broken across visible lines
@@ -147,7 +255,7 @@ func FromMatches(lines []string, matches [][]Match, known map[string]bool) []Vis
 		}
 		found := matches[i]
 		if skip > 0 {
-			found = FindAll(line[skip:])
+			found = findAll(line, skip)
 		}
 		for _, m := range found {
 			start := cells.Column(line, skip+m.Start)
@@ -234,6 +342,11 @@ func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 	for _, h := range hidden {
 		anchor := anchorText(h)
 		at := anchorCells(lines, anchor)
+		if len(at) == maxAnchorHits {
+			if c, ok := reportedCell(lines, h, anchor); ok {
+				at = []cell{c}
+			}
+		}
 		if len(at) == 0 {
 			fallback = append(fallback, h)
 			continue
@@ -299,6 +412,48 @@ func anchorCells(lines []string, anchor string) []cell {
 		}
 	}
 	return out
+}
+
+// reportedCell takes the observe stream at its word once the anchor sweep has
+// hit its cap. Below the cap every occurrence still gets its own hint, because
+// a hint has to be on the copy you are looking at; past it the sweep is
+// guessing, and one cell the stream and the snapshot agree on beats eight
+// truncated at an arbitrary place. The agreement is the whole test: a
+// coordinate sitting on its own anchor is right whatever produced it, which is
+// more than sizing the replay can promise.
+func reportedCell(lines []string, h ansi.Link, anchor string) (cell, bool) {
+	if h.Row < 0 || h.Row >= len(lines) {
+		return cell{}, false
+	}
+	line := lines[h.Row]
+	at := byteAt(line, h.Col)
+	if at < 0 || !strings.HasPrefix(line[at:], anchor) || !wholeToken(line, anchor, at) {
+		return cell{}, false
+	}
+	return cell{h.Row, h.Col}, true
+}
+
+// byteAt turns a display column back into a byte offset, and reports -1 for a
+// column falling inside a wide rune: there is no offset there, and answering
+// with the next rune's would verify the wrong text.
+func byteAt(line string, col int) int {
+	if col < 0 {
+		return -1
+	}
+	column := 0
+	for i, r := range line {
+		if column == col {
+			return i
+		}
+		if column > col {
+			return -1
+		}
+		column += cells.Width(string(r))
+	}
+	if column == col {
+		return len(line)
+	}
+	return -1
 }
 
 // blanksBefore counts the empty cells immediately left of a link, which is
