@@ -16,7 +16,7 @@ import (
 
 const (
 	// Silence this long means no repaint is coming.
-	firstFrameWait = 320 * time.Millisecond
+	firstFrameWait       = 320 * time.Millisecond
 	nudgedFirstFrameWait = 80 * time.Millisecond
 	// A repaint arrives as a burst; this much quiet ends it.
 	quietAfterFrame = 50 * time.Millisecond
