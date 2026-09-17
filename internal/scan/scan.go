@@ -1,4 +1,4 @@
-// Package scan turns a set of panes into a hint list.
+// Package scan turns panes into a hint list.
 package scan
 
 import (
@@ -12,29 +12,27 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/links"
 )
 
-// Source is the slice of Herdr that scanning needs.
+// Source is the Herdr slice scanning needs.
 type Source interface {
 	PaneLines(ctx context.Context, pane string) ([]string, error)
 	ObserveOSC8(ctx context.Context, pane string, cols, rows int) ([]ansi.Link, error)
 }
 
-// Pane is a pane to scan and the size its content is laid out in, which is
-// what the observe stream must be rendered at for its coordinates to mean
-// anything.
+// Pane is a pane to scan and its content size.
 type Pane struct {
 	ID   string
 	Cols int
 	Rows int
 }
 
-// Scanner logs a failed read rather than failing the scan.
+// Scanner logs failed reads rather than failing the scan.
 type Scanner struct {
 	Source      Source
 	Log         *slog.Logger
 	SkipObserve bool
 }
 
-// Links keeps the given pane order, so hint codes stay predictable.
+// Links keeps pane order, so codes stay predictable.
 func (s *Scanner) Links(ctx context.Context, panes []Pane) []links.Link {
 	perPane := make([][]links.Link, len(panes))
 	var wg sync.WaitGroup
@@ -82,11 +80,8 @@ func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
 	if len(visible) == 0 {
 		return nil
 	}
-	// Rejoined here rather than read back from Herdr: asking for unwrapped
-	// scrollback makes Herdr scroll the pane to answer, and the jump is
-	// visible.
-	// One sweep of the URL pattern feeds both the carry check and the link
-	// list; it used to run once for each and again inside guardUnwrap.
+	// Rejoined here: asking Herdr for unwrapped scrollback scrolls the pane.
+	// One URL sweep feeds both carry check and link list.
 	matches := links.MatchLines(visible)
 	var known map[string]bool
 	if carried := carries(visible, matches); len(carried) > 0 {
@@ -100,10 +95,7 @@ func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
 	return found
 }
 
-// unwrap rejoins the lines the snapshot broke at the pane's edge: a line
-// filled to the last cell is a soft wrap and continues into the next. The
-// result is the joined text its only caller wants, built in one buffer
-// rather than by growing a string per line.
+// unwrap rejoins soft-wrapped lines.
 func unwrap(visible []string, cols int) string {
 	if cols <= 0 {
 		return strings.Join(visible, "\n")
@@ -119,12 +111,7 @@ func unwrap(visible []string, cols int) string {
 	return out.String()
 }
 
-// guardUnwrap drops a completion only unwrap's own join could vouch for: a
-// carried match ending in trailing punctuation. Whether that mark ends prose
-// or continues the URL is a guess, and the joined text built from that guess
-// must not confirm it. Structural wraps carry no such mark and are kept.
-// Only soft-wrapped lines can join, mirroring unwrap, so a short line never
-// nukes an unrelated completion sharing its prefix.
+// guardUnwrap drops completions only the join could vouch for.
 func guardUnwrap(carried []carry, known map[string]bool, cols int) {
 	for _, c := range carried {
 		if cols <= 0 || cells.Width(c.line) < cols {
@@ -146,9 +133,7 @@ func guardUnwrap(carried []carry, known map[string]bool, cols int) {
 	}
 }
 
-// continuation is the next line's first token, the only text unwrap's join
-// could fuse onto the carry. A blank or indented next line breaks the run,
-// so there is no joined artifact to drop.
+// continuation is the next line's first token.
 func continuation(next string) string {
 	if next == "" {
 		return ""
@@ -163,17 +148,14 @@ func continuation(next string) string {
 	return next
 }
 
-// carry is a raw match running to the end of a non-final line, the case
-// links.FromLines would attempt to complete.
+// carry is a raw match running to a non-final line end.
 type carry struct {
 	line string
 	next string
 	raw  string
 }
 
-// carries mirrors the carry in links.FromLines. It matches on the raw end,
-// not the cleaned one: whether a trailing "." ends a URL or ends a sentence
-// is the very thing only scrollback can settle.
+// carries mirrors the carry in links.FromLines, matching on raw ends.
 func carries(visible []string, matches [][]links.Match) []carry {
 	var out []carry
 	for i, line := range visible {
@@ -197,16 +179,13 @@ func (s *Scanner) read(ctx context.Context, pane string) []string {
 	return text
 }
 
-// stillThere reports whether a link's own text is still at the cell it was
-// hinted on, once shift has moved it to row.
+// stillThere reports whether a link is still at its cell after scrolling.
 func stillThere(visible []string, choice links.Link, row int) bool {
 	if choice.Text == "" || row < 0 || row >= len(visible) {
 		return false
 	}
 	line := visible[row]
-	// A text link is confirmed by the whole URL the cell starts, not by
-	// finding its text there: the picked URL is a prefix of every longer one
-	// sharing it, and a substring match would settle for that instead.
+	// Text links match by whole URL at the cell, not substring.
 	if choice.Kind == links.Text {
 		for _, m := range links.FindAll(line) {
 			if cells.Column(line, m.Start) == choice.Col && links.Normalize(m.URL) == choice.URL {
@@ -228,12 +207,7 @@ func stillThere(visible []string, choice links.Link, row int) bool {
 	return false
 }
 
-// wrapped reports whether choice.Text is on screen as the soft wrap it was
-// read as: the run reaching this line's end at the link's own column, with
-// the rest of it resuming the next line. A URL completed across the edge is
-// never on one line whole, so that pair is all there is to confirm the cell
-// against. A run with nothing under it is a URL that really is that short,
-// which is the rule the scan itself joins by.
+// wrapped reports text split by a soft wrap.
 func wrapped(visible []string, choice links.Link, row int) bool {
 	if row+1 >= len(visible) {
 		return false
@@ -242,9 +216,7 @@ func wrapped(visible []string, choice links.Link, row int) bool {
 	if next == "" {
 		return false
 	}
-	// Ranging the string walks rune boundaries: a byte offset inside a rune
-	// measures as a column of its own, which can reach choice.Col before the
-	// boundary that really sits there.
+	// Walk rune boundaries: a byte offset inside a rune mismeasures.
 	for at := range line {
 		run := line[at:]
 		if cells.Column(line, at) != choice.Col || len(run) >= len(choice.Text) || !strings.HasPrefix(choice.Text, run) {
@@ -258,13 +230,11 @@ func wrapped(visible []string, choice links.Link, row int) bool {
 	return false
 }
 
-// Locate re-resolves a link's cell just before opening it: output may have
-// scrolled while the user was typing.
+// Locate re-resolves a link's cell after scrolling.
 func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row, col int, ok bool) {
 	shifted := choice.Row - shift
 	visible := s.read(ctx, choice.Pane)
-	// The same anchor can sit in several places, so the cell the hint was
-	// drawn on beats the first match anywhere.
+	// Prefer the hinted cell over the first match anywhere.
 	if stillThere(visible, choice, shifted) {
 		return shifted, choice.Col, true
 	}
@@ -277,10 +247,7 @@ func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row
 			}
 		}
 	}
-	// An OSC 8 target is nowhere in the text, so its anchor is all that is
-	// left to search for. A text link is its own anchor, so the sweep above
-	// already covers it, and a bare substring search here would settle for a
-	// longer URL that merely contains it.
+	// OSC8 targets need anchor search; text links already swept above.
 	if choice.Kind == links.OSC8 && choice.Text != "" {
 		for i, line := range visible {
 			if at := strings.Index(line, choice.Text); at >= 0 {

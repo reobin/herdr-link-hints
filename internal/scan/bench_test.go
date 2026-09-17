@@ -12,10 +12,7 @@ import (
 // reads as the soft wrap it was on screen.
 const paneCols = 204
 
-// benchPane is a real 204x57 Herdr pane, captured with
-// `herdr pane read <id> --source visible --format text`. It carries no URLs
-// of its own, which is the common case: most of a scan is the sweep that
-// finds nothing.
+// benchPane is a real 204x57 pane with no URLs: the common scan case.
 func benchPane(tb testing.TB) []string {
 	tb.Helper()
 	raw, err := os.ReadFile("testdata/pane.txt")

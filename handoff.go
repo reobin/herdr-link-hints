@@ -19,17 +19,12 @@ import (
 )
 
 const (
-	// envHandoff names the file the action process left its work in.
 	envHandoff = "HINTS_HANDOFF"
-	// handoffTTL is how long a payload is worth reading. The pane process
-	// starts milliseconds after it is written, so anything older belongs to
-	// a run that died.
+	// handoffTTL bounds how long a payload is trusted.
 	handoffTTL = 5 * time.Second
 )
 
-// prepared is the whole scan, already done. Nothing on the path that
-// produces it needs a terminal, so the action process can do it before the
-// picker pane exists and the pane spawn leaves the visible path.
+// prepared is the whole scan, already done.
 type prepared struct {
 	Focused   string
 	Panes     []herdr.Pane
@@ -38,21 +33,15 @@ type prepared struct {
 	Colors    theme.Colors
 	HasColors bool
 	Found     []links.Link
-	// Drawn names the panes whose overlay is already on screen, so the
-	// picker does not re-encode a frame that is already up.
+	// Drawn names panes whose overlay is already up.
 	Drawn   []string
 	WroteAt time.Time
 }
 
-// gather reads the layout, the scroll baseline and the links. It is the
-// same work in either process; only where it runs changes.
+// gather reads layout, scroll baseline, and links.
 func gather(ctx context.Context, client *herdr.Client, log *slog.Logger, focused string) prepared {
-	// pane.list carries every pane's scroll and pane.layout carries none,
-	// so the two run together and the scroll cost stays flat in pane count.
-	// Both must precede the snapshot they are the baseline for: sampled
-	// after, the scroll under-counts growth, so Locate misses the cell it
-	// confirms against and falls back to searching the whole pane, which can
-	// land on another copy of the same link.
+	// pane.list carries scroll, pane.layout none, so they run together.
+	// Both precede the snapshot they baseline.
 	var (
 		panes   []herdr.Pane
 		listed  map[string]herdr.Scroll
@@ -80,15 +69,12 @@ func gather(ctx context.Context, client *herdr.Client, log *slog.Logger, focused
 
 	scanner := &scan.Scanner{Source: client, Log: log, SkipObserve: os.Getenv("HINTS_NO_OBSERVE") != ""}
 	scanInput := scanPanes(panes, scrolls)
-	// The cursor sits where the prompt does: the viewport's bottom row.
-	// That is also where the newest output is, so nearness to it and
-	// recency pull the same way.
+	// Cursor at the viewport bottom, where the newest output is.
 	cursors := make(map[string]int, len(scanInput))
 	for _, pane := range scanInput {
 		cursors[pane.ID] = pane.Rows - 1
 	}
-	// The graphics infos ride alongside the scan: a serial fetch would sit
-	// on the critical path once the scan stops dominating it.
+	// Graphics infos ride alongside the scan.
 	var (
 		infos   map[string]herdr.Graphics
 		scanned []links.Link
@@ -114,8 +100,7 @@ func gather(ctx context.Context, client *herdr.Client, log *slog.Logger, focused
 	}
 }
 
-// writeHandoff leaves the payload where the pane process can pick it up.
-// The state dir is Herdr's, and both processes inherit it.
+// writeHandoff leaves the payload for the pane process.
 func writeHandoff(p prepared) (string, error) {
 	dir := os.Getenv("HERDR_PLUGIN_STATE_DIR")
 	if dir == "" {
@@ -137,8 +122,7 @@ func writeHandoff(p prepared) (string, error) {
 	return path, nil
 }
 
-// readHandoff consumes the payload, and reports false for anything it is
-// not sure of so the picker falls back to scanning for itself.
+// readHandoff consumes the payload, false when unsure.
 func readHandoff(path string, log *slog.Logger) (prepared, bool) {
 	if path == "" {
 		return prepared{}, false
@@ -165,8 +149,7 @@ func readHandoff(path string, log *slog.Logger) (prepared, bool) {
 	return p, true
 }
 
-// sweepHandoffs drops payloads nobody came for: a run whose picker pane
-// never opened leaves its file behind, and the state dir is Herdr's.
+// sweepHandoffs drops payloads nobody came for.
 func sweepHandoffs(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

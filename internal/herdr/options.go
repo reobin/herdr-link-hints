@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Option overrides a default that New took from the environment.
+// Option overrides a New default.
 type Option func(*Client)
 
 func WithSocket(path string) Option {

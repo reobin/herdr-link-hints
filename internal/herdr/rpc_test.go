@@ -259,10 +259,7 @@ func TestGraphicsInfosSkipsFailures(t *testing.T) {
 	}
 }
 
-// The request is encoded before the socket is dialled: the server polls for
-// a request line every 100ms, so anything done between connect and write
-// waits out a poll. An encode that cannot succeed must therefore never
-// reach the dial.
+// Encode failures must never reach the dial.
 func TestCallEncodesBeforeDialling(t *testing.T) {
 	t.Parallel()
 	var conns atomic.Int64

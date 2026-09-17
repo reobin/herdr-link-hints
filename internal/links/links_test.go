@@ -339,9 +339,7 @@ func TestFindAllBareHostsAndRemotes(t *testing.T) {
 	}
 }
 
-// The TLD gate exists for this list. A terminal shows far more filenames,
-// versions and field accesses than links, and every one of them is shaped
-// like a two-label host.
+// Filenames and field accesses outnumber links but must not hint.
 func TestFindAllRejectsWhatIsNotALink(t *testing.T) {
 	t.Parallel()
 	lines := []string{
@@ -384,7 +382,7 @@ func TestFindAllRejectsWhatIsNotALink(t *testing.T) {
 	}
 }
 
-// \b is an ASCII word boundary, so it leaves both ends of a bare host open.
+// \b leaves both ends of a bare host open.
 func TestFindAllBoundsAHost(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -412,8 +410,7 @@ func TestFindAllBoundsAHost(t *testing.T) {
 	}
 }
 
-// The www. branch stays ahead of the bare host, and skips the boundary
-// filters, so both the extent and the placement it has always had survive.
+// www. wins over the bare host without boundary filters.
 func TestFindAllKeepsTheWwwBranchWinning(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ line, want string }{
@@ -458,8 +455,7 @@ func TestNormalizeShapes(t *testing.T) {
 	}
 }
 
-// A real eslint dump is the corpus the gate has to survive: paths, versions,
-// package specs and field accesses, and not one link.
+// Tool output with paths and versions must yield no links.
 func TestFindAllOnAPaneOfToolOutput(t *testing.T) {
 	t.Parallel()
 	pane, err := os.ReadFile(filepath.Join("..", "scan", "testdata", "pane.txt"))
@@ -473,8 +469,7 @@ func TestFindAllOnAPaneOfToolOutput(t *testing.T) {
 	}
 }
 
-// Past the cap the anchor sweep is guessing at which eight of many cells to
-// mark, so a replay coordinate the snapshot agrees with wins instead.
+// Past the cap a verified replay cell wins.
 func TestMergePrefersAVerifiedReplayCellPastTheCap(t *testing.T) {
 	t.Parallel()
 	flood := func(line string) []string {

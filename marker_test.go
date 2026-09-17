@@ -17,8 +17,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
-// graphicsCall is one pane.graphics.set or pane.graphics.clear the marker
-// made, in the order the server saw it.
+// graphicsCall is one graphics call in server order.
 type graphicsCall struct {
 	method string
 	pane   string
@@ -27,9 +26,7 @@ type graphicsCall struct {
 
 func (c graphicsCall) String() string { return c.method + " " + c.pane + " " + c.layer }
 
-// graphicsServer stands in for Herdr's socket. It records every graphics
-// call and answers each one, or refuses the layers named in refuse, which
-// is how a pane that has run out of layers is reproduced.
+// graphicsServer fakes Herdr's socket, refusing layers in refuse.
 type graphicsServer struct {
 	mu     sync.Mutex
 	calls  []graphicsCall
@@ -49,7 +46,7 @@ func (s *graphicsServer) seen() []graphicsCall {
 	return slices.Clone(s.calls)
 }
 
-// layerSets is the layers a set landed on, in order.
+// layerSets is set layers in order.
 func (s *graphicsServer) layerSets() []string {
 	var out []string
 	for _, c := range s.seen() {
@@ -69,8 +66,7 @@ func indexOf(calls []graphicsCall, want string) int {
 	return -1
 }
 
-// startGraphicsServer listens on a unix socket the way the herdr package's
-// own tests do, so the marker is exercised through the real client.
+// startGraphicsServer exercises the marker through the real client.
 func startGraphicsServer(t *testing.T) (*graphicsServer, string) {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "hl-marker")
@@ -171,12 +167,7 @@ func narrow(badges []overlay.Badge, keep ...int) []overlay.Badge {
 	return out
 }
 
-// TestDrawBadgesSetsBeforeClearing pins the order the swap happens in. The
-// bright frame has to stay up until the new badge layers are in place:
-// clearing it first leaves a window, short but real, in which the pane
-// shows nothing but the dim backdrop. Herdr repaints on its own schedule,
-// so that window is a full-pane flash on every keystroke - which is the
-// flicker this whole path exists to remove.
+// TestDrawBadgesSetsBeforeClearing pins set-before-clear order.
 func TestDrawBadgesSetsBeforeClearing(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -211,8 +202,7 @@ func TestDrawBadgesSetsBeforeClearing(t *testing.T) {
 	}
 }
 
-// TestDrawBadgesRedrawsOnlyWhatChanged is the win itself: narrowing again
-// must touch the badges whose state moved and leave the rest alone.
+// TestDrawBadgesRedrawsOnlyWhatChanged pins minimal redraws.
 func TestDrawBadgesRedrawsOnlyWhatChanged(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -247,10 +237,7 @@ func TestDrawBadgesRedrawsOnlyWhatChanged(t *testing.T) {
 	}
 }
 
-// TestDrawFallsBackToAFrameWhenALayerIsRefused covers the path that would
-// otherwise rot: Herdr turning a set down mid-narrow. The pane has to end
-// up showing a correct whole frame, with no half-applied badge layers left
-// behind.
+// TestDrawFallsBackToAFrameWhenALayerIsRefused pins fallback to a frame.
 func TestDrawFallsBackToAFrameWhenALayerIsRefused(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -285,8 +272,7 @@ func TestDrawFallsBackToAFrameWhenALayerIsRefused(t *testing.T) {
 	}
 }
 
-// TestClearTakesDownEveryLayer: a layer Herdr accepted outlives the process
-// that set it, so anything left behind stays on the user's screen.
+// TestClearTakesDownEveryLayer pins full cleanup.
 func TestClearTakesDownEveryLayer(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -332,9 +318,7 @@ func spend(claims []claim, layered map[string]bool, used int) int {
 	return total
 }
 
-// TestLayerBudgetHoldsTheGlobalCap is the case per-pane budgeting passes
-// and a busy screen fails: eight panes each inside the 16-layer per-pane
-// cap would claim well past the 64 Herdr allows across all of them.
+// TestLayerBudgetHoldsTheGlobalCap pins the total cap.
 func TestLayerBudgetHoldsTheGlobalCap(t *testing.T) {
 	t.Parallel()
 	claims := claimsOf(13, 13, 13, 13, 13, 13, 13, 13)
@@ -350,8 +334,7 @@ func TestLayerBudgetHoldsTheGlobalCap(t *testing.T) {
 	}
 }
 
-// TestLayerBudgetTakesTheCheapestPanesFirst: fitting the most panes is what
-// keeps the most of the screen on the cheap path.
+// TestLayerBudgetTakesTheCheapestPanesFirst pins cheapest-first.
 func TestLayerBudgetTakesTheCheapestPanesFirst(t *testing.T) {
 	t.Parallel()
 	claims := claimsOf(14, 1, 14, 1, 14, 1)
@@ -366,8 +349,7 @@ func TestLayerBudgetTakesTheCheapestPanesFirst(t *testing.T) {
 	}
 }
 
-// TestLayerBudgetRefusesPastThePerPaneCap: one pane cannot narrow by layer
-// however much global room there is.
+// TestLayerBudgetRefusesPastThePerPaneCap pins the per-pane cap.
 func TestLayerBudgetRefusesPastThePerPaneCap(t *testing.T) {
 	t.Parallel()
 	claims := []claim{{pane: "a", matches: 15, perPane: 16}}
@@ -380,8 +362,7 @@ func TestLayerBudgetRefusesPastThePerPaneCap(t *testing.T) {
 	}
 }
 
-// TestLayerBudgetCountsPanesItCannotHelp: a pane still holding a frame
-// takes a layer from the same global pool.
+// TestLayerBudgetCountsPanesItCannotHelp pins counting held frames.
 func TestLayerBudgetCountsPanesItCannotHelp(t *testing.T) {
 	t.Parallel()
 	claims := claimsOf(10)
@@ -393,9 +374,7 @@ func TestLayerBudgetCountsPanesItCannotHelp(t *testing.T) {
 	}
 }
 
-// TestDrawUsesAFrameUntilTheBackdropIsUp: prime runs off the critical path,
-// so a keystroke can land before it finishes. Until it does, the pane has
-// no backdrop for badge layers to sit on and must re-render its frame.
+// TestDrawUsesAFrameUntilTheBackdropIsUp pins frame fallback pre-prime.
 func TestDrawUsesAFrameUntilTheBackdropIsUp(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -413,10 +392,7 @@ func TestDrawUsesAFrameUntilTheBackdropIsUp(t *testing.T) {
 	}
 }
 
-// TestDrawRejectsAPlanFromADifferentScan: a plan placed the codes against
-// one set of links. Reusing it after a rescan would draw a code the user
-// has already seen against a different link, and they would open a URL
-// they were not looking at. A whole frame is always correct.
+// TestDrawRejectsAPlanFromADifferentScan pins stale plan rejection.
 func TestDrawRejectsAPlanFromADifferentScan(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -452,10 +428,7 @@ func TestBadgeLayerIDsAreDistinctFromTheOthers(t *testing.T) {
 	}
 }
 
-// TestPrimeStrandsNothingAfterClear is the failure mode that outlives the
-// process: prime runs off the critical path, so the user can pick a link
-// while it is still in flight. A backdrop that lands after clear() has run
-// would stay on the pane with nothing left to take it down.
+// TestPrimeStrandsNothingAfterClear pins no late backdrop after clear.
 func TestPrimeStrandsNothingAfterClear(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -492,12 +465,7 @@ func TestPrimeStrandsNothingAfterClear(t *testing.T) {
 	}
 }
 
-// TestDrawFallsBackWhenARuledOutBadgeShowsTypedProgress: the backdrop is
-// drawn once with nothing typed, but hints.Badges gives a ruled-out badge
-// the runes its code shares with what was typed - "ad" keeps one after
-// "as" - and draws that cell inverted. No bright layer covers a ruled-out
-// badge, so the pane has to re-render its frame or it would silently stop
-// showing the prefix.
+// TestDrawFallsBackWhenARuledOutBadgeShowsTypedProgress pins frame fallback.
 func TestDrawFallsBackWhenARuledOutBadgeShowsTypedProgress(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -539,12 +507,7 @@ func TestBackdropShows(t *testing.T) {
 	}
 }
 
-// TestALinkLessPaneCostsNothing: the frame stopped dimming the pane, so
-// everything a pane with no links on it would have drawn is now a viewport
-// of transparent pixels. Encoding and pushing one per pane is waste on the
-// keystroke path, and the backdrop it leaves behind claims two of Herdr's
-// 64 layers, which can push a pane that does have badges off the layered
-// path and back onto a full re-encode.
+// TestALinkLessPaneCostsNothing pins no draws on empty panes.
 func TestALinkLessPaneCostsNothing(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)
@@ -567,8 +530,7 @@ func TestALinkLessPaneCostsNothing(t *testing.T) {
 	}
 }
 
-// A pane another process drew on still has to be cleared when this scan
-// finds no links there, or its frame outlives the hints it was drawn for.
+// Adopted frames still clear when the scan finds nothing.
 func TestALinkLessPaneStillClearsAnAdoptedFrame(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)

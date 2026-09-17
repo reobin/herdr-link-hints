@@ -246,9 +246,7 @@ func TestOpenHidesTheCursor(t *testing.T) {
 	}
 }
 
-// OnNarrow fires once before the first keystroke and again on every change,
-// but not for the keystroke that resolves the pick: that frame would be torn
-// down before it could be read.
+// OnNarrow skips the resolving keystroke.
 func TestPickReportsEachNarrowing(t *testing.T) {
 	t.Parallel()
 	var typed []string

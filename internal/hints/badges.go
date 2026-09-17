@@ -6,9 +6,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/overlay"
 )
 
-// Badges dims the links a prefix has ruled out rather than removing
-// them, so the screen keeps its shape while the user types, grouped by
-// the pane each badge is drawn in.
+// Badges dims ruled-out links, grouped by pane.
 func Badges(found []links.Link, codes []string, matches []int, typed string) map[string][]overlay.Badge {
 	matched := make(map[int]bool, len(matches))
 	for _, i := range matches {
@@ -29,8 +27,7 @@ func Badges(found []links.Link, codes []string, matches []int, typed string) map
 	return badges
 }
 
-// commonPrefix counts the leading runes code and typed share, so a ruled-out
-// badge never claims more than it matches.
+// commonPrefix counts shared leading runes.
 func commonPrefix(code, typed string) int {
 	cr, tr := []rune(code), []rune(typed)
 	n := 0

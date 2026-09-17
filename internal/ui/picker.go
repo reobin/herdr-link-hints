@@ -12,16 +12,13 @@ type Item struct {
 
 type Options struct {
 	Alphabet string
-	// OnNarrow runs whenever the match set changes, so a caller can redraw
-	// hints the picker knows nothing about.
+	// OnNarrow redraws hints on match changes.
 	OnNarrow func(matches []int, typed string)
 }
 
-// Pick selects a code the moment it is unambiguous, so most picks need no
-// Enter. The second result is false when the user quits or input ends.
+// Pick selects a code once unambiguous.
 func Pick(t *Terminal, items []Item, opts Options) (int, bool) {
-	// Line mode reads a code from a pipe, and stdout may still be a screen:
-	// the centred status would clear it.
+	// Piped input reads a code per line.
 	if !t.interactive() {
 		narrow(opts, indices(items), "")
 		return t.pickByLine(items)
@@ -31,8 +28,7 @@ func Pick(t *Terminal, items []Item, opts Options) (int, bool) {
 	first := true
 	for {
 		matches := matching(items, typed)
-		// Deciding before drawing: that frame would be torn down at once,
-		// on the one keystroke the user is waiting for.
+		// Decide before drawing; that frame would tear down at once.
 		if len(matches) == 1 && typed != "" {
 			return matches[0], true
 		}
@@ -66,8 +62,7 @@ func narrow(opts Options, matches []int, typed string) {
 	}
 }
 
-// pickByLine takes one whole code per line, for a stdin that is not a
-// terminal.
+// pickByLine reads one code per line.
 func (t *Terminal) pickByLine(items []Item) (int, bool) {
 	line, err := t.lines.ReadString('\n')
 	code := strings.TrimSpace(line)
@@ -108,16 +103,12 @@ func (t *Terminal) renderStatus(matches int, typed string) {
 	t.centred(echo(typed), count(matches, t.cols))
 }
 
-// Blank before the first keystroke rather than a prompt glyph: the row is
-// reserved either way, which is what stops the count moving when typing
-// starts.
+// Blank before the first keystroke keeps the count from moving.
 func echo(typed string) line {
 	return line{{text: typed, sgr: "1"}}
 }
 
-// The theme's own yellow marks a prefix that has ruled every hint out. The
-// box is a few cells wide, so past three digits the unit goes rather than
-// wrapping onto the row below.
+// Past three digits the unit goes rather than wrapping.
 func count(matches, width int) line {
 	if matches == 0 {
 		return line{{text: "no match", sgr: "33"}}
@@ -133,8 +124,7 @@ func count(matches, width int) line {
 	return line{{text: number, sgr: "1"}, {text: unit, sgr: "2"}}
 }
 
-// Sized from what the pane reports, not what was asked for: Herdr floors a
-// popup at more rows than it is given.
+// Sized from what the pane reports, not what was asked for.
 func (t *Terminal) centred(lines ...line) {
 	t.Clear()
 	t.Printf("%s", strings.Repeat("\n", topPad(t.rows, len(lines))))
@@ -147,8 +137,7 @@ func (t *Terminal) centred(lines ...line) {
 	t.Flush()
 }
 
-// A line knows its own width: its escape codes are not part of what the
-// reader sees.
+// A line knows its width without escape codes.
 type line []segment
 
 type segment struct {
@@ -172,14 +161,12 @@ func (l line) width() int {
 	return total
 }
 
-// Rounding the left pad up holds the left edge still as the count gains a
-// digit.
+// Rounding left pad up holds the edge still as the count grows.
 func centrePad(width, text int) int {
 	return max((width-text+1)/2, 0)
 }
 
-// Rounding down centres the count rather than the block: it is the last
-// line, so a spare row above would carry it off the middle.
+// Rounding down centres the count, not the block.
 func topPad(rows, lines int) int {
 	return max((rows-lines)/2, 0)
 }

@@ -1,4 +1,4 @@
-// Package ui renders the hint picker and reads the user's keystrokes.
+// Package ui renders the picker and reads keystrokes.
 package ui
 
 import (
@@ -19,8 +19,7 @@ const (
 	fallbackCols = 80
 )
 
-// Every colour query goes out before anything is read, so one deadline
-// covers the lot. maxReply fits rgb: components of any width.
+// One deadline covers all colour queries.
 const (
 	themeWait = 150 * time.Millisecond
 	maxReply  = 64
@@ -30,8 +29,7 @@ const spinnerTick = 90 * time.Millisecond
 
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
-// Terminal reads single keystrokes in raw mode on a tty, and whole lines
-// otherwise, which keeps the picker scriptable and testable.
+// Terminal reads keys on a tty, lines otherwise.
 type Terminal struct {
 	out     *bufio.Writer
 	keys    <-chan byte
@@ -41,7 +39,7 @@ type Terminal struct {
 	cols    int
 }
 
-// Open must be paired with Close to put the terminal back.
+// Open must pair with Close.
 func Open(in *os.File, out io.Writer) *Terminal {
 	t := &Terminal{out: bufio.NewWriter(out), rows: fallbackRows, cols: fallbackCols}
 	restore, err := enterRaw(in)
@@ -51,7 +49,7 @@ func Open(in *os.File, out io.Writer) *Terminal {
 	}
 	t.restore = restore
 	t.keys = readBytes(in)
-	// Nothing here is typed into, so a blinking cursor only invites it.
+	// Nothing is typed here, so hide the cursor.
 	t.hideCursor()
 	if rows, cols, ok := screenSize(in); ok {
 		t.rows, t.cols = rows, cols
@@ -61,15 +59,10 @@ func Open(in *os.File, out io.Writer) *Terminal {
 
 func (t *Terminal) interactive() bool { return t.keys != nil }
 
-// Size is what the pane actually got, not what was asked for.
+// Size is what the pane got, not what was asked for.
 func (t *Terminal) Size() (rows, cols int) { return t.rows, t.cols }
 
-// Theme asks the terminal what colours it is painted in, falling back to
-// black and white when it does not answer. A full reply is remembered on
-// disk keyed by TERM_PROGRAM for a day, so the next run under the same
-// terminal skips the round trip and its wait. Delete
-// ~/Library/Caches/herdr-link-hints/theme-*.json or set
-// HINTS_NO_THEME_CACHE=1 to force a live probe after a light/dark switch.
+// Theme asks the terminal its colours, caching full replies by TERM_PROGRAM.
 func (t *Terminal) Theme() theme.Colors {
 	colors := theme.Fallback()
 	if !t.interactive() {
@@ -104,7 +97,7 @@ func (t *Terminal) Theme() theme.Colors {
 	return colors
 }
 
-// readReply collects one OSC report, which ends at either BEL or ST.
+// readReply collects one OSC report ending at BEL or ST.
 func (t *Terminal) readReply(deadline time.Time) (string, bool) {
 	var reply strings.Builder
 	for reply.Len() < maxReply {
@@ -145,8 +138,7 @@ func (t *Terminal) Clear() {
 
 func (t *Terminal) Flush() { _ = t.out.Flush() }
 
-// spinnerText drops the label rather than clipping it: the annotate pane is
-// a few cells wide, and half a word reads worse than none.
+// spinnerText drops the label rather than clipping it.
 func (t *Terminal) spinnerText(frame int, label string) string {
 	spinner := spinnerFrames[frame%len(spinnerFrames)]
 	if len([]rune(spinner))+1+len([]rune(label)) > t.cols {
@@ -155,8 +147,7 @@ func (t *Terminal) spinnerText(frame int, label string) string {
 	return spinner + " " + label
 }
 
-// Spin animates a label until stop is called, and is the only writer to
-// the terminal in the meantime.
+// Spin animates a label until stop.
 func (t *Terminal) Spin(label string) (stop func()) {
 	if !t.interactive() {
 		t.Printf("%s\n", label)
@@ -188,13 +179,12 @@ func (t *Terminal) hideCursor() { _, _ = fmt.Fprint(t.out, "\x1b[?25l") }
 
 func (t *Terminal) showCursor() { _, _ = fmt.Fprint(t.out, "\x1b[?25h") }
 
-// crlf compensates for raw mode, which does not translate newlines.
+// crlf compensates for raw mode.
 func crlf(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
 }
 
-// Pause waits for any key, so an error stays readable before a popup pane
-// closes. It takes the pane over rather than printing over the spinner.
+// Pause waits for a key so a message stays readable.
 func (t *Terminal) Pause(message string) {
 	if !t.interactive() {
 		t.Printf("%s\n", message)
@@ -206,8 +196,7 @@ func (t *Terminal) Pause(message string) {
 	t.readKey()
 }
 
-// enterRaw sets raw mode through termios, and keeps the stty path for any
-// terminal the ioctl will not answer for.
+// enterRaw sets raw mode, falling back to stty.
 func enterRaw(tty *os.File) (func(), error) {
 	if restore, err := enterRawIoctl(tty); err == nil {
 		return restore, nil
@@ -215,8 +204,7 @@ func enterRaw(tty *os.File) (func(), error) {
 	return enterRawStty(tty)
 }
 
-// enterRawStty runs stty against the real terminal: Go hands a child
-// /dev/null when Stdin is nil, and `stty -g` then fails.
+// enterRawStty runs stty on the real terminal.
 func enterRawStty(tty *os.File) (func(), error) {
 	saved, err := stty(tty, "-g")
 	if err != nil {
@@ -259,8 +247,7 @@ func screenSizeStty(tty *os.File) (rows, cols int, ok bool) {
 	return rows, cols, true
 }
 
-// readBytes streams one byte at a time, so a read can be given a deadline
-// without putting the descriptor in non-blocking mode.
+// readBytes streams bytes so reads can have deadlines.
 func readBytes(in *os.File) <-chan byte {
 	out := make(chan byte)
 	go func() {

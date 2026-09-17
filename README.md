@@ -26,66 +26,11 @@ description = "hint links in focused pane"
 
 ## Use
 
-Press the bound key. Links on screen are boxed and get a hint code
-beside them. Type the code; hints that no longer match fade, and the
-match opens as soon as it is unambiguous. Backspace edits, Enter opens a
-single match, Esc quits.
-
-A small popup shows how many hints are left, and says `no match` when a
-prefix has ruled them all out.
-
-What gets a hint:
-
-* a URL with a scheme: `https`, `http`, `ftp`, `file`, `mailto`
-* a `www.` host
-* a bare host on a known TLD, like `github.com/reobin/herdr` or
-  `herdr.dev`
-* an ssh remote, like `git@github.com:reobin/herdr-link-hints.git`, which
-  opens its https form
-* a terminal hyperlink (OSC 8), wherever its text sits
-
-The TLD list is deliberately short. It leaves out every name that is also
-a common file extension or a common field name, so `install.sh`,
-`lib.rs`, `README.md` and `log.info` stay unmarked. A host on a name it
-leaves out gets no hint, and neither does `localhost:3000` or a bare IP.
+Press the bound key, type a hint code to open it. Esc quits.
 
 ![demo](docs/demo.gif)
 
-## Demo
-
-`picker --demo` runs the picker over a fixed synthetic pane with no
-Herdr connection. It renders the hint frames without showing them, so it
-exercises the whole pick path from any terminal:
-
-```sh
-go build -trimpath -o picker .
-echo a | ./picker --demo
-```
-
-`docs/demo.gif` plays a synthetic session: the pane at rest, a keypress,
-hints easing in over the pane, the typed code narrowing them to one, the
-pick opening. Rebuild it after any overlay or demo change:
-
-```sh
-./scripts/build-demo-gif.sh
-```
-
-Every layer is drawn at the gif's own resolution. `pane.txt` is set with
-ImageMagick in JetBrains Mono (`DEMO_FONT` overrides the typeface), and the hints come from the plugin's own renderer through
-`go run ./internal/demo/frames`, at the cell size the gif uses rather
-than the goldens'. `pane.txt` is freshness-checked against `PaneLines()`,
-so the background can never drift from the badge coordinates.
-
-Refresh the goldens with `UPDATE_GOLDEN=1 go test ./internal/demo/`.
-`TestRenderBudget` fails the build when a full-screen render exceeds
-2s, or 10s under the race detector; `go test -bench . ./...` tracks render speed.
-
-The hints are drawn with Herdr's pane graphics, which need a terminal
-with Kitty graphics support, and in the colours the terminal reports for
-itself. Without Kitty graphics there are no badges to draw on, so the
-picker falls back to a code list.
-
-## From source
+## Build from source
 
 Needs Go 1.24+.
 
@@ -96,11 +41,11 @@ herdr plugin link /path/to/herdr-link-hints
 
 ## Settings
 
-| Variable | Default | Effect |
-| --- | --- | --- |
-| `HINTS_WIDTH` | 14 | picker popup width |
-| `HINTS_HEIGHT` | 5 | picker popup height |
-| `HINTS_PLACEMENT` | popup | picker pane placement; only popup takes a size |
-| `HINTS_NO_OBSERVE` | unset | skip the observe stream when set |
-| `HINTS_NO_THEME_CACHE` | unset | skip the theme cache and probe the terminal live |
-| `HINTS_DEBUG` | unset | log to stderr, or to the named file |
+| Variable               | Default | Effect                                           |
+| ---------------------- | ------- | ------------------------------------------------ |
+| `HINTS_WIDTH`          | 14      | picker popup width                               |
+| `HINTS_HEIGHT`         | 5       | picker popup height                              |
+| `HINTS_PLACEMENT`      | popup   | picker pane placement; only popup takes a size   |
+| `HINTS_NO_OBSERVE`     | unset   | skip the observe stream when set                 |
+| `HINTS_NO_THEME_CACHE` | unset   | skip the theme cache and probe the terminal live |
+| `HINTS_DEBUG`          | unset   | log to stderr, or to the named file              |

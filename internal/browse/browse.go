@@ -8,8 +8,7 @@ import (
 	"strings"
 )
 
-// javascript: and data: stay out: a terminal may render them, but they are
-// not ours to launch.
+// schemes are safe to hand to the desktop.
 var schemes = []string{"http://", "https://", "ftp://", "file://", "mailto:"}
 
 func Open(url string) error {

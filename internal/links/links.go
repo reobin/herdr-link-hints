@@ -11,8 +11,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/cells"
 )
 
-// Kind decides how a link can be found again later: plain text can be
-// searched for by URL, an OSC 8 target never appears on screen.
+// Kind is how a link is re-found: text by URL, OSC8 by anchor.
 type Kind int
 
 const (
@@ -21,19 +20,17 @@ const (
 )
 
 type Link struct {
-	URL  string // where it goes, ready for a browser
-	Text string // what the screen shows
+	URL  string // ready to open
+	Text string // as shown
 	Kind Kind
 	Row  int // 0-based viewport row
-	Col  int // 0-based display column, not a byte offset
+	Col  int // display column
 	Pane string
-	// Before counts the blank cells left of the link, which is the room a
-	// hint has beside it.
+	// Before is blank cells left of the link.
 	Before int
 }
 
-// Visible holds a URL as it appears on screen, so it can be searched for
-// again after the pane scrolls.
+// Visible is a URL as shown, for re-finding after scroll.
 type Visible struct {
 	Match string
 	Row   int
@@ -41,7 +38,7 @@ type Visible struct {
 }
 
 type Match struct {
-	URL   string // trimmed of trailing prose punctuation
+	URL   string
 	Raw   string
 	Start int
 	End   int
@@ -49,35 +46,25 @@ type Match struct {
 
 const (
 	trailingPunctuation = `.,;:!?'"`
-	// linkChar is what a URL may run over: anything but whitespace, the
-	// characters a shell quotes with, and C0 controls.
+	// linkChar excludes whitespace, shell quotes, and C0 controls.
 	linkChar = "[^\\s<>\"'`\\\\\x00-\x1f]"
-	// hostLabel is one DNS label, which may not open or close on a hyphen.
+	// hostLabel is one DNS label: no leading or trailing hyphen.
 	hostLabel = `[a-z0-9](?:[a-z0-9-]*[a-z0-9])?`
-	// hostNeighbours are the characters that make a token a path, a version
-	// or a field access rather than a host. \b does not rule them out.
+	// hostNeighbours mark a token as path, version, or field access.
 	hostNeighbours = `/.-@:~`
 )
 
-// schemePrefixes mirrors what browse will open. A match starting with one of
-// these, or with www., is trusted as it always was; only the bare-host and ssh
-// shapes pay for the boundary filters.
+// schemePrefixes are trusted without boundary checks.
 var schemePrefixes = []string{"http:", "https:", "ftp:", "file:", "mailto:"}
 
 var (
-	// host is a bare host gated on the TLD list: the gate is the only thing
-	// keeping main.go and v1.2.3 off the screen.
+	// host is a bare host gated on the TLD list.
 	host = hostLabel + `(?:\.` + hostLabel + `)*\.(?:` + tldAlternation + `)`
-	// scpPath is deliberately owner/repo shaped. It is what keeps an ssh
-	// port out of "git@host:22", keeps "git@host:~/notes" from normalizing
-	// into a URL nobody can open, and lets the branch do without the
-	// lookahead RE2 does not have.
+	// scpPath is owner/repo shaped, without lookahead.
 	scpPath = `[\w.-]+/[\w./-]+`
 
 	urlPattern = regexp.MustCompile(
-		// (?i) here runs to the end of the pattern, so every branch below
-		// is case-insensitive too. www. stays ahead of the bare host so a
-		// www. match keeps the extent it has always had.
+		// (?i) applies to the whole pattern.
 		"(?i)" +
 			`\b(?:https?|ftp|file|mailto):` + linkChar + `+` +
 			`|\b[a-z0-9._-]+@` + host + `:` + scpPath +
@@ -90,8 +77,7 @@ var (
 	brackets     = []struct{ open, close byte }{{'(', ')'}, {'[', ']'}, {'{', '}'}}
 )
 
-// Clean keeps a closing bracket the URL opened itself, so targets like
-// .../Foo_(disambiguation) survive.
+// Clean trims prose punctuation but keeps balanced brackets.
 func Clean(url string) string {
 	for {
 		trimmed := strings.TrimRight(url, trailingPunctuation)
@@ -118,12 +104,8 @@ func unbalanced(url string) bool {
 	return false
 }
 
-// Normalize supplies the scheme a host leaves out, and rewrites an ssh remote
-// into the https form that is the only one a browser can open. It recognizes
-// a shape or leaves the string alone: Merge and shadowed run it over every OSC
-// 8 target too, and those carry schemes of their own that are none of our
-// business. It is also idempotent, which is what lets Locate compare a freshly
-// read token against a URL normalized a keystroke ago.
+// Normalize adds a missing scheme or rewrites ssh remotes to https.
+// Idempotent, so fresh and stored URLs compare equal.
 func Normalize(url string) string {
 	if schemed(url) {
 		return url
@@ -140,9 +122,7 @@ func Normalize(url string) string {
 	return url
 }
 
-// schemed keeps a URL that already says where it goes off the host rules. The
-// "://" test cannot be loosened to a bare colon: a host carries one too, in
-// example.com:8080.
+// schemed reports URLs that already name a scheme.
 func schemed(url string) bool {
 	return strings.Contains(url, "://") || strings.HasPrefix(strings.ToLower(url), "mailto:")
 }
@@ -151,10 +131,7 @@ func FindAll(line string) []Match {
 	return findAll(line, 0)
 }
 
-// findAll sweeps from a byte offset but reads its left context out of the
-// whole line, so a match resuming after a carry is judged by what really
-// precedes it. Offsets stay relative to the sweep, which is what the caller
-// measures columns against.
+// findAll sweeps from an offset but judges boundaries against the whole line.
 func findAll(line string, from int) []Match {
 	var out []Match
 	for _, loc := range urlPattern.FindAllStringIndex(line[from:], -1) {
@@ -181,12 +158,7 @@ func needsBoundaries(raw string) bool {
 	return true
 }
 
-// bounded rejects a host that is really part of something else. \b is an ASCII
-// word boundary, which leaves both ends open: on the left it reads the
-// continuation byte of "bücher.de" as a break and matches "cher.de", and on
-// the right it is satisfied by the dot in "java.io.IOException", so the engine
-// settles for the prefix that happens to end in a TLD. A dot followed by a
-// letter is that case; a dot followed by anything else ends a sentence.
+// bounded rejects hosts inside larger tokens. \b is ASCII-only and stops at dots.
 func bounded(line string, start, end int) bool {
 	if start > 0 {
 		before, _ := utf8.DecodeLastRuneInString(line[:start])
@@ -208,8 +180,7 @@ func bounded(line string, start, end int) bool {
 	return true
 }
 
-// Known indexes unwrapped scrollback so a URL broken across visible lines
-// can be completed from the real thing instead of guessed at.
+// Known indexes unwrapped scrollback for cross-line completion.
 func Known(text string) map[string]bool {
 	known := map[string]bool{}
 	for _, m := range FindAll(text) {
@@ -218,8 +189,6 @@ func Known(text string) map[string]bool {
 	return known
 }
 
-// MatchLines runs the URL pattern over each line once, so callers that
-// need the matches more than once do not pay for the sweep again.
 func MatchLines(lines []string) [][]Match {
 	matches := make([][]Match, len(lines))
 	for i, line := range lines {
@@ -228,15 +197,11 @@ func MatchLines(lines []string) [][]Match {
 	return matches
 }
 
-// FromLines carries a URL that runs to the end of a line into the next
-// one, rather than blindly joining whatever follows it.
+// FromLines joins URLs wrapped across lines.
 func FromLines(lines []string, known map[string]bool) []Visible {
 	return FromMatches(lines, MatchLines(lines), known)
 }
 
-// FromMatches is FromLines over matches already found. A carry makes the
-// next line resume past what the completion consumed, and only then is the
-// line swept again.
 func FromMatches(lines []string, matches [][]Match, known map[string]bool) []Visible {
 	var (
 		out     []Visible
@@ -272,10 +237,7 @@ func FromMatches(lines []string, matches [][]Match, known map[string]bool) []Vis
 	return out
 }
 
-// complete reports how many bytes of this line the continuation consumed.
-// A carry ending in trailing punctuation is prose until proven otherwise,
-// so it never completes from known: the joined text built from that guess
-// must not confirm it.
+// complete finishes a carried match from known scrollback.
 func complete(carried Visible, line string, known map[string]bool) (Visible, int) {
 	if Clean(carried.Match) != carried.Match {
 		carried.Match = Clean(carried.Match)
@@ -316,16 +278,10 @@ type cell struct {
 	col int
 }
 
-// maxAnchorHits caps how often one hidden link may be marked, so a label as
-// short as "#2" cannot flood a screen with hints.
+// maxAnchorHits caps marks per hidden link.
 const maxAnchorHits = 8
 
-// Merge places a hidden link by searching the visible text for its anchor:
-// the observe stream is a repaint of its own, so it can be staler than the
-// snapshot and its coordinates are the last resort. Every occurrence is
-// marked. A last-resort placement yields to a snapshot-placed link for the
-// same target on a neighbouring cell: that pair is one visual link seen
-// before and after output arrived mid-scan, not two links.
+// Merge places hidden links by anchor text, falling back to stream coordinates.
 func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 	var out []Link
 	taken := map[cell]bool{}
@@ -367,9 +323,7 @@ func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 	return out
 }
 
-// shadowed reports whether the snapshot already placed the same target on
-// a neighbouring cell: the fallback coordinates are then stale output,
-// not a second link.
+// shadowed reports links already placed on a neighbouring cell.
 func shadowed(placed []Link, h ansi.Link) bool {
 	for _, link := range placed {
 		if Normalize(link.URL) != Normalize(h.URL) {
@@ -414,13 +368,7 @@ func anchorCells(lines []string, anchor string) []cell {
 	return out
 }
 
-// reportedCell takes the observe stream at its word once the anchor sweep has
-// hit its cap. Below the cap every occurrence still gets its own hint, because
-// a hint has to be on the copy you are looking at; past it the sweep is
-// guessing, and one cell the stream and the snapshot agree on beats eight
-// truncated at an arbitrary place. The agreement is the whole test: a
-// coordinate sitting on its own anchor is right whatever produced it, which is
-// more than sizing the replay can promise.
+// reportedCell trusts stream coordinates only when the anchor is there.
 func reportedCell(lines []string, h ansi.Link, anchor string) (cell, bool) {
 	if h.Row < 0 || h.Row >= len(lines) {
 		return cell{}, false
@@ -433,9 +381,7 @@ func reportedCell(lines []string, h ansi.Link, anchor string) (cell, bool) {
 	return cell{h.Row, h.Col}, true
 }
 
-// byteAt turns a display column back into a byte offset, and reports -1 for a
-// column falling inside a wide rune: there is no offset there, and answering
-// with the next rune's would verify the wrong text.
+// byteAt maps a display column to a byte offset, -1 inside a wide rune.
 func byteAt(line string, col int) int {
 	if col < 0 {
 		return -1
@@ -456,8 +402,7 @@ func byteAt(line string, col int) int {
 	return -1
 }
 
-// blanksBefore counts the empty cells immediately left of a link, which is
-// where its hint can sit without covering the link itself.
+// blanksBefore counts empty cells left of a link.
 func blanksBefore(lines []string, row, col int) int {
 	if row < 0 || row >= len(lines) || col <= 0 {
 		return 0
@@ -485,8 +430,7 @@ func anchorText(h ansi.Link) string {
 	return h.URL
 }
 
-// wholeToken rejects an anchor that is only part of a longer run of text, so
-// a link labelled #1 does not claim the #1 inside #123.
+// wholeToken rejects anchors inside longer text.
 func wholeToken(line, anchor string, start int) bool {
 	first, _ := utf8.DecodeRuneInString(anchor)
 	last, _ := utf8.DecodeLastRuneInString(anchor)

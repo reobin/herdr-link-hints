@@ -359,9 +359,7 @@ func TestRenderKeepsAFullScreenUnderTheCap(t *testing.T) {
 	}
 }
 
-// A badge stays on its link's row and against its edge, covering a
-// character of the text beside it when the gutter is too narrow. Only a
-// cell another link already holds pushes it off the row.
+// Badges stay on the link row unless pushed off.
 func TestPlaceKeepsTheHintOffTheLink(t *testing.T) {
 	t.Parallel()
 	wide := Size{Cols: 80, Rows: 24}
@@ -493,9 +491,7 @@ func TestPlaceAvoidsANeighboursLink(t *testing.T) {
 	}
 }
 
-// Three links on one row exhausted the old four-spot search, so the third
-// badge landed on a taken cell. The spiral has to place all three clear
-// of every link and of each other.
+// Three badges on one row must all clear every link.
 func TestClipPlacesThreeBadgesOnOneRow(t *testing.T) {
 	t.Parallel()
 	wide := Size{Cols: 80, Rows: 24}
@@ -524,9 +520,7 @@ func TestClipPlacesThreeBadgesOnOneRow(t *testing.T) {
 	}
 }
 
-// With its own row packed either side and the rows directly above and
-// below holding neighbour links, the badge escapes to the second row out
-// rather than overlapping one.
+// Packed rows push the badge two rows out.
 func TestPlaceReachesTheSecondRow(t *testing.T) {
 	t.Parallel()
 	wide := Size{Cols: 80, Rows: 24}

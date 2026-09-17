@@ -2,8 +2,7 @@ package ui
 
 import "time"
 
-// escapeSequenceWait separates a pressed Esc from the start of a sequence:
-// the rest of a sequence follows immediately, a second keypress does not.
+// escapeSequenceWait separates Esc from a sequence start.
 const escapeSequenceWait = 40 * time.Millisecond
 
 type keyKind int
@@ -36,7 +35,7 @@ func (t *Terminal) readKey() key {
 		case '\r', '\n':
 			return key{kind: keyEnter}
 		case 0x03, 0x04:
-			// Raw mode delivers ctrl-c and ctrl-d as bytes, not signals.
+			// Raw mode delivers these as bytes, not signals.
 			return key{kind: keyEscape}
 		default:
 			if b >= ' ' && b < 0x7f {
@@ -46,8 +45,7 @@ func (t *Terminal) readKey() key {
 	}
 }
 
-// readEscape keeps an arrow key from reading as a bare Esc, which would
-// close the picker.
+// readEscape keeps arrows from reading as Esc.
 func (t *Terminal) readEscape() key {
 	b, open := t.nextByte(escapeSequenceWait)
 	if !open {
@@ -59,7 +57,7 @@ func (t *Terminal) readEscape() key {
 	if b != '[' && b != 'O' {
 		return key{kind: keyEscape}
 	}
-	// CSI and SS3 sequences run until a final byte in the @-~ range.
+	// CSI and SS3 run until a final byte in @-~.
 	for {
 		b, open := t.nextByte(escapeSequenceWait)
 		if !open || (b >= '@' && b <= '~') {
@@ -68,8 +66,7 @@ func (t *Terminal) readEscape() key {
 	}
 }
 
-// skipOSC swallows an OSC reply that missed the theme deadline, which
-// would otherwise read as a bare Esc and close the picker.
+// skipOSC swallows a late OSC reply that would read as Esc.
 func (t *Terminal) skipOSC() key {
 	for {
 		b, open := t.nextByte(escapeSequenceWait)

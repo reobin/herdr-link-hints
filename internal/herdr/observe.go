@@ -15,13 +15,8 @@ import (
 )
 
 const (
-	// Herdr replays a repaint as soon as the stream opens, so silence this
-	// long means there is nothing to see. The unnudged wait has to clear
-	// the server's 250ms client-accept poll, and sitting exactly on it
-	// throws away frames that were already in flight.
+	// Silence this long means no repaint is coming.
 	firstFrameWait = 320 * time.Millisecond
-	// Nudged, the accept happens in the same loop iteration, so the wait
-	// only has to cover the stream itself.
 	nudgedFirstFrameWait = 80 * time.Millisecond
 	// A repaint arrives as a burst; this much quiet ends it.
 	quietAfterFrame = 50 * time.Millisecond
@@ -29,16 +24,11 @@ const (
 	observeLimit = 800 * time.Millisecond
 	maxFrameSize = 4 << 20
 
-	// The nudge can reach the server before the observer has finished
-	// connecting, which wins nothing, so it repeats.
 	nudgeAttempts = 4
 	nudgeInterval = 25 * time.Millisecond
 )
 
-// ObserveOSC8 is the only way to see a link whose URL never appears as
-// text: snapshots strip OSC 8 targets. The stream is closed before return.
-// Unsized, Herdr renders the stream into a frame of its own default shape,
-// which wraps the output elsewhere and moves every link.
+// ObserveOSC8 sees links whose URL never appears as text.
 func (c *Client) ObserveOSC8(ctx context.Context, pane string, cols, rows int) ([]ansi.Link, error) {
 	ctx, cancel := context.WithTimeout(ctx, observeLimit)
 	defer cancel()
@@ -68,16 +58,8 @@ func (c *Client) ObserveOSC8(ctx context.Context, pane string, cols, rows int) (
 	return ansi.ParseLinks(collectFrames(ctx, frames, landed, nudged)), nil
 }
 
-// nudge wakes the headless loop so it runs its client-accept step now. The
-// loop otherwise sleeps up to 250ms with nothing in its select watching the
-// client listener, which is the entire observe delay. Any API request will
-// do; pane.list is absent from the server's UI-dirty set, so it repaints
-// nothing. Each success is reported as it happens, because only a nudge
-// that got through makes the short first-frame wait safe.
-//
-// It repeats because a nudge can arrive before the observer has finished
-// connecting, which wakes the loop to accept nobody. Repeats stop as soon
-// as a frame lands, so the later ones only run when nothing is coming.
+// nudge wakes the headless loop so it accepts clients now. Repeats stop
+// once a frame lands.
 func (c *Client) nudge(ctx context.Context, landed <-chan struct{}) <-chan struct{} {
 	woke := make(chan struct{}, nudgeAttempts)
 	go func() {
@@ -97,9 +79,7 @@ func (c *Client) nudge(ctx context.Context, landed <-chan struct{}) <-chan struc
 	return woke
 }
 
-// collectFrames gathers a repaint: it waits for the stream to start, then
-// for it to go quiet. Splitting it out keeps the timing testable without a
-// subprocess.
+// collectFrames gathers a repaint: wait for start, then quiet.
 func collectFrames(ctx context.Context, frames <-chan []byte, landed chan<- struct{}, woke <-chan struct{}) []byte {
 	var stream []byte
 	first := true
@@ -110,9 +90,6 @@ func collectFrames(ctx context.Context, frames <-chan []byte, landed chan<- stru
 		case <-ctx.Done():
 			return stream
 		case <-woke:
-			// The accept poll is out of the way, so the wait no longer has
-			// to cover it. Unnudged it stands, rather than timing out on a
-			// frame that was already in flight.
 			if first {
 				resetTimer(timer, nudgedFirstFrameWait)
 			}
@@ -124,8 +101,7 @@ func collectFrames(ctx context.Context, frames <-chan []byte, landed chan<- stru
 				first = false
 				close(landed)
 			}
-			// A frame is a PTY read chunk of any size, so every one has to
-			// hold the window open or a repaint is cut mid-sequence.
+			// Frames are PTY chunks of any size; each holds the window open.
 			stream = append(stream, frame...)
 			resetTimer(timer, quietAfterFrame)
 		case <-timer.C:

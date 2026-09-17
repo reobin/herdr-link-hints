@@ -5,8 +5,7 @@ const (
 	glyphHeight = 8
 )
 
-// glyphs are 5x8 bitmaps, one byte per row, bit 4 leftmost. Row 6 is the
-// baseline, row 7 the descenders.
+// glyphs are 5x8, one byte per row, bit 4 leftmost.
 var glyphs = map[rune][glyphHeight]byte{
 	'0': {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E, 0x00},
 	'1': {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E, 0x00},
@@ -48,8 +47,7 @@ var glyphs = map[rune][glyphHeight]byte{
 	'-': {0x00, 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00},
 }
 
-// glyph returns the bitmap for r. Codes are drawn lowercase whatever the
-// alphabet's case.
+// glyph returns the bitmap for r, folding case.
 func glyph(r rune) ([glyphHeight]byte, bool) {
 	if r >= 'A' && r <= 'Z' {
 		r += 'a' - 'A'

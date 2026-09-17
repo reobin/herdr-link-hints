@@ -1,4 +1,4 @@
-// Package demo holds the fixed synthetic pane behind picker --demo.
+// Package demo holds the synthetic pane behind picker --demo.
 package demo
 
 import (
@@ -25,9 +25,7 @@ func Viewport() overlay.Size { return overlay.Size{Cols: Cols, Rows: Rows} }
 
 func Cell() overlay.Cell { return overlay.Cell{Width: CellW, Height: CellH} }
 
-// Colors is a typical dark palette, as a terminal would report it: the
-// demo shows the badge in the theme's own accent, not the all-white
-// fallback.
+// Colors is a typical dark palette.
 func Colors() theme.Colors {
 	return theme.Colors{
 		Foreground: color.RGBA{R: 0xC0, G: 0xCA, B: 0xF5, A: 0xFF},
@@ -38,9 +36,7 @@ func Colors() theme.Colors {
 	}
 }
 
-// Links runs the real scanner over PaneLines, plus one hidden OSC 8 link
-// anchored on #232, so every URL the pane shows gets a hint and each
-// badge sits where the plugin would put it.
+// Links runs the real scanner over PaneLines, plus one hidden OSC 8 link.
 func Links() []links.Link {
 	lines := PaneLines()
 	hidden := []ansi.Link{{URL: "https://github.com/o/r/pull/232", Label: "#232"}}
@@ -90,9 +86,7 @@ func Scenes() map[string]overlay.Scene {
 	}
 }
 
-// PaneLines is the synthetic screen the demo badges sit on. Every link
-// text sits at its link's row and column, so a background rendered from
-// these lines lines up with the overlay frames.
+// PaneLines is the synthetic demo screen.
 func PaneLines() []string {
 	lines := []string{
 		"$ herdr plugin install reobin/herdr-link-hints",

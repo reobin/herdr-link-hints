@@ -1,10 +1,9 @@
-// Package cells measures terminal text in display columns, the unit
-// Herdr's viewport coordinates count.
+// Package cells measures text in display columns.
 package cells
 
 import "unicode"
 
-// Column converts a byte offset into a display column.
+// Column converts a byte offset to a display column.
 func Column(line string, byteIndex int) int {
 	if byteIndex > len(line) {
 		byteIndex = len(line)
@@ -15,7 +14,7 @@ func Column(line string, byteIndex int) int {
 	return Width(line[:byteIndex])
 }
 
-// Width reports how many cells a string occupies.
+// Width reports a string's cell count.
 func Width(s string) int {
 	total := 0
 	for _, r := range s {
@@ -37,8 +36,7 @@ func runeWidth(r rune) int {
 	}
 }
 
-// wideRanges are the East Asian Wide and Fullwidth blocks, plus the emoji
-// blocks terminals render double-width.
+// wideRanges are double-width blocks.
 var wideRanges = [...]struct{ lo, hi rune }{
 	{0x1100, 0x115F},
 	{0x231A, 0x231B},

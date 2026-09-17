@@ -19,9 +19,7 @@ func TestCodes(t *testing.T) {
 	}
 }
 
-// Past the alphabet's size the shortest leaf is expanded, so codes stay
-// as short as they can be: 27 links over 26 characters is 25 singles and
-// a pair of doubles.
+// Codes grow shortest first.
 func TestCodesGrowShortestFirst(t *testing.T) {
 	t.Parallel()
 	base := len([]rune(DefaultAlphabet))

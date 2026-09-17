@@ -40,16 +40,7 @@ func composite(t *testing.T, backdrop Frame, layers []Frame) *image.RGBA {
 	return out
 }
 
-// TestLayersCompositeToTheFrame is what makes narrowing by layer safe to
-// do at all: the dim backdrop with a bright layer over every badge that
-// still matches has to be the same picture as re-encoding the whole
-// viewport, pixel for pixel. It holds because every bright thing a badge
-// layer draws is opaque, so it covers the ruled-out version underneath
-// rather than blending with it.
-//
-// It holds on one precondition: no ruled-out badge carries typed progress,
-// which the backdrop was drawn without and no bright layer would cover.
-// marker.backdropShows enforces it by re-rendering the frame instead.
+// TestLayersCompositeToTheFrame pins layered output equals a frame.
 func TestLayersCompositeToTheFrame(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 40, Rows: 8}
@@ -98,10 +89,7 @@ func TestLayersCompositeToTheFrame(t *testing.T) {
 	}
 }
 
-// TestLayerCoversTheBadgeAndItsBox pins what a badge layer has to reach:
-// both the hint and the link it boxes, however far place() moved them
-// apart. A layer that covered only the hint would leave the box dim on a
-// link that still matches.
+// TestLayerCoversTheBadgeAndItsBox pins layer extent.
 func TestLayerCoversTheBadgeAndItsBox(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 40, Rows: 8}
@@ -136,11 +124,7 @@ func TestLayerCoversTheBadgeAndItsBox(t *testing.T) {
 	}
 }
 
-// TestPlacementIgnoresNarrowing is the property the whole layered path
-// rests on, and the one that would be silently wrong if it broke: typing
-// must not move a badge. If placement depended on which links still
-// matched, a code already on screen against one link would be redrawn
-// against another, and the user would open a URL they were not looking at.
+// TestPlacementIgnoresNarrowing pins typing never moves a badge.
 func TestPlacementIgnoresNarrowing(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 40, Rows: 8}

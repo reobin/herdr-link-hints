@@ -13,15 +13,13 @@ import (
 	"sync/atomic"
 )
 
-// Activation reports Handled only when a configured link handler actually
-// opened the target; otherwise opening is left to the caller.
+// Activation reports whether a handler opened the target.
 type Activation struct {
 	URL     string `json:"url"`
 	Handled bool   `json:"handled"`
 }
 
-// ActivateLink goes through Herdr so OSC 8 targets and custom handlers
-// resolve the way a click would.
+// ActivateLink resolves like a click would.
 func (c *Client) ActivateLink(ctx context.Context, pane string, row, col int) (Activation, error) {
 	var result Activation
 	params := map[string]any{"pane_id": pane, "viewport_row": row, "col": col}
@@ -41,7 +39,7 @@ type rpcResponse struct {
 	Error  *rpcError       `json:"error"`
 }
 
-// Code is Herdr's error code, a string rather than the number it looks like.
+// Code is Herdr's error code, a string that looks like a number.
 type rpcError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -61,10 +59,8 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	ctx, cancel := context.WithTimeout(ctx, c.rpcTimeout)
 	defer cancel()
 
-	// Encoded before dialling, not after. The server reads a request line a
-	// byte at a time and sleeps 100ms whenever that read comes up empty, so
-	// any work between connecting and writing loses the race and waits out
-	// the poll.
+	// Encoded before dialling: the server polls, so work between
+	// connect and write waits it out.
 	id := nextRequestID()
 	body, err := json.Marshal(rpcRequest{ID: id, Method: method, Params: params})
 	if err != nil {
@@ -77,13 +73,12 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 		return fmt.Errorf("send %s request: %w", method, err)
 	}
 	defer func() { _ = conn.Close() }()
-	// After the write: a deadline set before it is one more thing between
-	// connect and the first byte.
+	// Deadline after the write, not before.
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}
 
-	// The socket also carries events and other clients' replies.
+	// The socket also carries other clients' replies.
 	decoder := json.NewDecoder(conn)
 	for {
 		var response rpcResponse
@@ -106,14 +101,10 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	}
 }
 
-// sendMu keeps concurrent callers from interleaving their connect and
-// write. Two goroutines that dial at once both land in the server's poll
-// and both wait it out; queued, the second pays nothing.
+// sendMu serializes connect-and-write; reads wait outside the lock.
 var sendMu sync.Mutex
 
-// send dials and writes the request as one step, and hands back the
-// connection to read the reply from. The lock is released before the read,
-// which is where the waiting belongs.
+// send dials and writes as one step.
 func (c *Client) send(ctx context.Context, body []byte) (net.Conn, error) {
 	sendMu.Lock()
 	defer sendMu.Unlock()
@@ -129,7 +120,7 @@ func (c *Client) send(ctx context.Context, body []byte) (net.Conn, error) {
 	return conn, nil
 }
 
-// dial opens one connection for a single call.
+// dial opens one connection for one call.
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "unix", c.socket)
@@ -139,9 +130,8 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	return conn, nil
 }
 
-// Graphics reports what pane.graphics can do for a pane. A feature_disabled
-// error instead means the outer terminal has no Kitty graphics support,
-// which is the signal to fall back to the list picker.
+// Graphics reports what pane.graphics can do. feature_disabled means no
+// Kitty support: fall back to the list picker.
 type Graphics struct {
 	CellWidthPx  int  `json:"cell_width_px"`
 	CellHeightPx int  `json:"cell_height_px"`
@@ -155,10 +145,7 @@ func (c *Client) GraphicsInfo(ctx context.Context, pane string) (Graphics, error
 	return result, err
 }
 
-// GraphicsInfos fetches every pane's graphics info concurrently and keeps
-// only the successes: the marker build runs alongside the link scan, so a
-// serial fetch would sit on the critical path once the scan stops
-// dominating it. A pane with no entry is one that cannot be drawn on.
+// GraphicsInfos fetches every pane concurrently, keeping successes.
 func (c *Client) GraphicsInfos(ctx context.Context, panes []string) map[string]Graphics {
 	infos := make(map[string]Graphics, len(panes))
 	var (
@@ -182,7 +169,7 @@ func (c *Client) GraphicsInfos(ctx context.Context, panes []string) map[string]G
 	return infos
 }
 
-// Frame is one image placed over a pane's viewport cells.
+// Frame is one image over viewport cells.
 type Frame struct {
 	Pane   string
 	Layer  string
@@ -215,14 +202,12 @@ func (c *Client) SetGraphics(ctx context.Context, f Frame) error {
 	return c.call(ctx, "pane.graphics.set", params, nil)
 }
 
-// ClearGraphics names the layer: omitting it would clear only the layer
-// Herdr calls "primary", not ours.
+// ClearGraphics names the layer: omitting it clears only "primary".
 func (c *Client) ClearGraphics(ctx context.Context, pane, layer string) error {
 	return c.call(ctx, "pane.graphics.clear", map[string]any{"pane_id": pane, "layer_id": layer}, nil)
 }
 
-// PaneOpen describes the plugin pane to open. Width and Height take either
-// a cell count or a percentage such as "80%".
+// PaneOpen describes the plugin pane to open. Width and Height are cells or percent.
 type PaneOpen struct {
 	Plugin     string
 	Entrypoint string
@@ -233,10 +218,7 @@ type PaneOpen struct {
 	Env        map[string]string
 }
 
-// OpenPane returns the new pane's id where Herdr reports one. Popup
-// placement does not: it answers with an empty result, so the id comes back
-// blank and there is no handle to close the popup with afterwards. Esc is
-// the only way out of a stuck one.
+// OpenPane returns the new pane id, blank for popups.
 func (c *Client) OpenPane(ctx context.Context, p PaneOpen) (string, error) {
 	params := map[string]any{
 		"plugin_id":  p.Plugin,
@@ -265,8 +247,7 @@ func (c *Client) OpenPane(ctx context.Context, p PaneOpen) (string, error) {
 	return result.PluginPane.Pane.PaneID, err
 }
 
-// popupSize keeps a percentage a string and a cell count a number, which is
-// the only shape Herdr accepts for each.
+// popupSize keeps percent a string and cells a number.
 func popupSize(size string) (any, bool) {
 	if size == "" {
 		return nil, false

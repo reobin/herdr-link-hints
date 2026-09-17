@@ -11,9 +11,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/cells"
 )
 
-// Link is a completed OSC 8 hyperlink. Row and Col are 0-based cells from
-// the stream's origin: Herdr opens an observe stream with ESC[2J ESC[1;1H,
-// so they line up with viewport coordinates.
+// Link is a completed OSC 8 hyperlink. Row and Col are viewport cells.
 type Link struct {
 	URL   string
 	Row   int
@@ -31,8 +29,7 @@ var (
 	osc8Pattern = regexp.MustCompile("\x1b\\]8;[^;]*;([^\x1b\x07]*?)(?:\x1b\\\\|\x07)")
 )
 
-// ParseLinks drops a link whose closing sequence never arrives: without it
-// the anchor text, and so the link's extent, is unknown.
+// ParseLinks drops links whose close never arrives.
 func ParseLinks(data []byte) []Link {
 	s := string(data)
 	cur := cursor{row: 1, col: 1}
@@ -59,7 +56,6 @@ func ParseLinks(data []byte) []Link {
 		}
 	}
 	if idx < len(s) {
-		// Trailing text cannot close an open link, so it emits nothing.
 		cur.writeText(s[idx:], open)
 	}
 	return found
@@ -123,7 +119,7 @@ func (p *pending) write(ch rune, row, col int) {
 	}
 }
 
-// cursor is 1-based, the way CSI sequences address the screen.
+// cursor is 1-based, like CSI addresses.
 type cursor struct {
 	row int
 	col int
@@ -144,7 +140,7 @@ func (c *cursor) writeText(chunk string, open *pending) {
 		case ch == '\t':
 			c.col += tabStop - ((c.col - 1) % tabStop)
 		case ch < ' ':
-			// Other control characters do not move the cursor.
+			// Other controls don't move the cursor.
 		default:
 			open.write(ch, c.row, c.col)
 			c.col += cells.Width(string(ch))
@@ -199,8 +195,7 @@ func param(params string, i, fallback int) int {
 	return n
 }
 
-// distance reads a movement count, where an omitted or zero parameter
-// means one cell.
+// distance reads a movement count, defaulting to one.
 func distance(params string) int {
 	if n := param(params, 0, 1); n > 0 {
 		return n

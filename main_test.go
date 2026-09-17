@@ -16,8 +16,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
-// Every debug line carries how long the process has been running, so the
-// startup cost is measured rather than estimated.
+// Duration stamps startup cost.
 func TestLoggerStampsDuration(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
@@ -100,8 +99,7 @@ func TestItemsFor(t *testing.T) {
 	}
 }
 
-// Without a graphics layer the pick continues as a code list: no badge
-// redraws are wired, and nothing exits.
+// Without a layer the pick is a code list.
 func TestNarrowOptsFallsBackToListWithoutALayer(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.DiscardHandler)
@@ -201,10 +199,7 @@ func TestContentStripsThePaneBorder(t *testing.T) {
 	}
 }
 
-// The popup is a fixed content-sized box: wide enough for the spinner with
-// its label and a three-digit count with its unit, tall enough to centre
-// the count on the middle row. Herdr numbers are outer dimensions with a
-// border cell on each side, so the asked shape is two bigger each way.
+// The popup is a fixed box holding the readout plus border.
 func TestPaneShape(t *testing.T) {
 	t.Run("the fixed shape holds the readout", func(t *testing.T) {
 		t.Parallel()
@@ -239,7 +234,7 @@ func TestPaneFor(t *testing.T) {
 			t.Fatalf("paneFor() = %+v", got)
 		}
 	})
-	// Only a popup takes a size, so any other placement must ask for none.
+	// Only popups take a size.
 	t.Run("the environment overrides the placement", func(t *testing.T) {
 		t.Setenv("HINTS_PLACEMENT", "overlay")
 		got := paneFor()
@@ -249,9 +244,7 @@ func TestPaneFor(t *testing.T) {
 	})
 }
 
-// Every keystroke that narrows the matches redraws every pane, and a
-// full-viewport render is 5-7ms, so a pane whose badges did not move must
-// not be re-encoded. Only an identical badge set already on screen counts.
+// Unchanged panes must not re-encode.
 func TestMarkerSkipsOnlyUnchangedPanes(t *testing.T) {
 	t.Parallel()
 	badges := []overlay.Badge{{Row: 1, Col: 2, Width: 4, Code: "as"}}

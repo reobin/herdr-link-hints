@@ -5,25 +5,9 @@ import (
 	"strings"
 )
 
-// tlds gates the bare-host and ssh shapes. Without a gate the pattern marks
-// every filename on screen, so the list is an allowlist rather than a denylist.
-//
-// It is the IANA root zone, all ~1440 delegated names, narrowed by hand under
-// one rule with two clauses: a name stays out if it is a common file
-// extension, or if it is a plausible lowercase field or method name. A dotted
-// identifier is shaped exactly like a two-label host, and a terminal shows far
-// more of them than of links.
-//
-// Both clauses earn their place. As extensions: .sh .rs .md .py .pl .pm .so
-// .ml .cc .ps .tf .pub .fish .zip .mov .app are all real TLDs, and would mark
-// install.sh, lib.rs, README.md and main.tf. As identifiers: .info .name .id
-// .at .top .run .page .one .pro .team .link .click .email .store .chat .live
-// .work .build .tools .int would mark log.info, user.id, arr.at and c.run.
-// Short English words are both at once: .in .to .is .it .be .by .do .im .my
-// .no .ie. And .test is reserved by RFC 2606, never delegated.
-//
-// The cost is that a host on a name left out gets no hint: bun.sh, docs.rs,
-// vercel.app and any .it or .in site. The README says so.
+// tlds is the bare-host allowlist: IANA names minus common file extensions
+// (.sh, .rs, .md) and lowercase identifiers (.info, .id, .at) that would
+// otherwise hint filenames and field access.
 var tlds = map[string]bool{
 	"ai": true, "au": true, "br": true, "ca": true, "ch": true,
 	"cloud": true, "cn": true, "co": true, "com": true, "cz": true,
@@ -36,8 +20,7 @@ var tlds = map[string]bool{
 	"tv": true, "ua": true, "uk": true, "xyz": true, "za": true,
 }
 
-// tldAlternation is the gate as regex source, longest name first so the
-// generated branch reads the way it matches.
+// tldAlternation is tlds as regex, longest first.
 var tldAlternation = alternation(tlds)
 
 func alternation(set map[string]bool) string {

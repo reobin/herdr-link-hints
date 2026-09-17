@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// keys.go maps ctrl-c and ctrl-d from the bytes raw mode delivers, so a
-// raw mode that left ISIG on would turn them back into signals and take
-// the picker's own quit path away.
+// Raw mode must leave quit bytes as bytes, not signals.
 func TestRawModeClearsTheFlagsKeysDependOn(t *testing.T) {
 	t.Parallel()
 	// The flag fields are uint32 on linux and uint64 on darwin, so every

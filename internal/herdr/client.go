@@ -1,9 +1,4 @@
-// Package herdr talks to a running Herdr server over the control socket,
-// dialling fresh for each call: the server reads one request line, answers
-// it and closes, so a connection cannot carry a second call. It falls back
-// to the CLI for pane inspection until socket parity is proven. ObserveOSC8
-// stays on the CLI: no live OSC 8 sample exists to prove a socket snapshot
-// carries the same targets at the same cells.
+// Package herdr talks to a running Herdr server over the control socket.
 package herdr
 
 import (
@@ -22,9 +17,7 @@ import (
 // SourceVisible is the `herdr pane read --source` value scanning uses.
 const SourceVisible = "visible"
 
-// Client dials Herdr's control socket fresh for each call. It starts
-// nothing that outlives it; pane inspection that cannot go over the
-// socket falls back to the CLI.
+// Client dials Herdr's control socket fresh for each call.
 type Client struct {
 	bin        string
 	socket     string
@@ -44,17 +37,14 @@ func New(opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
-	// The shim that resolves a bare name costs 100ms a call, against 6ms
-	// for the binary it ends up running.
+	// Resolving via PATH costs ~100ms against ~6ms for the binary.
 	if os.Getenv("HERDR_BIN_PATH") == "" {
 		c.log.Debug("HERDR_BIN_PATH unset, resolving herdr through PATH", "bin", c.bin)
 	}
 	return c
 }
 
-// fellBack records a socket error the CLI is about to paper over. A dial
-// refused returns at once, but a server that accepts and goes quiet costs
-// the full rpc timeout here and the command timeout again below.
+// fellBack records a socket error papered over by the CLI.
 func (c *Client) fellBack(method string, err error) {
 	c.log.Debug("socket call failed, falling back to the CLI", "method", method, "error", err)
 }
@@ -74,9 +64,7 @@ func defaultSocket() string {
 	return filepath.Join(home, ".config", "herdr", "herdr.sock")
 }
 
-// PaneLines reads a pane's visible text, leaving the extent to Herdr. It
-// goes over the socket and falls back to the CLI until socket parity is
-// proven.
+// PaneLines reads a pane's visible text.
 func (c *Client) PaneLines(ctx context.Context, pane string) ([]string, error) {
 	text, err := c.paneLinesSocket(ctx, pane)
 	if err == nil {
@@ -103,17 +91,14 @@ func (c *Client) paneLinesSocket(ctx context.Context, pane string) ([]string, er
 	return strings.Split(result.Read.Text, "\n"), nil
 }
 
-// Pane is a pane on screen. Width and Height are its outer rect in cells,
-// border included.
+// Pane is a pane on screen. Width and Height include the border.
 type Pane struct {
 	ID     string
 	Width  int
 	Height int
 }
 
-// ScreenPanes lists the panes sharing a screen with the given one, and
-// falls back to that pane alone when the layout cannot be read. It goes
-// over the socket and falls back to the CLI until socket parity is proven.
+// ScreenPanes lists panes sharing a screen, else the pane alone.
 func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]Pane, error) {
 	panes, err := c.screenPanesSocket(ctx, pane)
 	if err == nil {
@@ -137,8 +122,7 @@ func (c *Client) screenPanesSocket(ctx context.Context, pane string) ([]Pane, er
 	return panesFromLayout(result.Layout, pane), nil
 }
 
-// layoutResult is the layout object both the CLI envelope and the socket
-// result carry.
+// layoutResult is the layout object CLI and socket share.
 type layoutResult struct {
 	Panes []layoutPane `json:"panes"`
 }
@@ -176,9 +160,7 @@ func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
 	return panesFromLayout(payload.Result.Layout, fallback), nil
 }
 
-// PaneLabels gives every requested pane an entry, falling back to the tail
-// of its ID. It goes over the socket and falls back to the CLI until socket
-// parity is proven.
+// PaneLabels gives every pane an entry, defaulting to its short ID.
 func (c *Client) PaneLabels(ctx context.Context, panes []string) (map[string]string, error) {
 	labels := defaultLabels(panes)
 	listed, err := c.paneLabelsSocket(ctx, labels)
@@ -246,16 +228,13 @@ func shortID(pane string) string {
 	return pane
 }
 
-// Scroll is a pane's scroll state. Offset is how far scrollback reaches
-// below the viewport.
+// Scroll is a pane's scroll state. Offset is scrollback below the viewport.
 type Scroll struct {
 	Offset       int
 	ViewportRows int
 }
 
-// PaneScrolls reads every pane's scroll state from one pane.list, rather
-// than a pane.get each. pane.layout carries no scroll at all, so this can
-// run beside it, and it makes the cost flat in pane count.
+// PaneScrolls reads every pane's scroll from one pane.list.
 func (c *Client) PaneScrolls(ctx context.Context) (map[string]Scroll, error) {
 	var result struct {
 		Panes []labelPane `json:"panes"`

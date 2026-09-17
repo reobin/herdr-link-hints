@@ -41,14 +41,13 @@ func TestHandoffRoundTrip(t *testing.T) {
 	if got.Infos["w1:p1"].CellWidthPx != 19 || got.Scrolls["w1:p1"].Offset != 3 {
 		t.Fatalf("readHandoff() lost pane state: %+v", got)
 	}
-	// Consumed, so a second picker cannot pick up a scan meant for the first.
+	// Consumed: no second pickup.
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("the payload should be removed once read")
 	}
 }
 
-// Anything the picker cannot vouch for means scanning for itself, which is
-// what it did before the action process took the work over.
+// Untrusted payloads fall back to scanning.
 func TestHandoffRejectsWhatItCannotTrust(t *testing.T) {
 	dir := t.TempDir()
 	log := discardLogger()
@@ -81,8 +80,7 @@ func TestHandoffRejectsWhatItCannotTrust(t *testing.T) {
 	}
 }
 
-// The state dir is Herdr's, so a run whose picker never opened must not
-// leave its payload there for good.
+// Abandoned payloads must not linger.
 func TestHandoffSweepsWhatNobodyCameFor(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)

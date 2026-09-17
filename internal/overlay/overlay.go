@@ -1,5 +1,4 @@
-// Package overlay draws hint badges into an image Herdr composites over a
-// pane: its graphics API takes pixels, not text.
+// Package overlay draws hint badges Herdr composites over a pane.
 package overlay
 
 import (
@@ -13,23 +12,20 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
-// LayerID names the one graphics layer this plugin owns per pane.
+// LayerID is this plugin's graphics layer per pane.
 const LayerID = "link-hints"
 
-// maxFrameBytes is Herdr's cap on an inline pane.graphics.set frame.
+// maxFrameBytes is Herdr's inline frame cap.
 const maxFrameBytes = 512 << 10
 
-// linkStroke is the pixels the box around a link takes on each side.
+// linkStroke is the link box width in pixels.
 const linkStroke = 2
 
-// badgeStroke is the pixels the badge's own outline takes. Lighter than the
-// link box so the two read as a pair rather than one slab where they meet.
+// badgeStroke is the badge outline width.
 const badgeStroke = 1
 
 const (
-	// colorClear has to stay first: it is the index an untouched image is
-	// already filled with, and every pixel the overlay does not draw on has
-	// to let the pane through.
+	// colorClear must stay first: untouched pixels show the pane through.
 	colorClear uint8 = iota
 	colorBorder
 	colorBackground
@@ -39,15 +35,12 @@ const (
 	colorDimText
 )
 
-// aaBase is the first palette entry past the flat colours: the blends a
-// smoothed glyph edge is quantized into.
+// aaBase starts the glyph edge blends.
 const aaBase = colorDimText + 1
 
-// aaSteps is the coverage levels per smoothed edge pixel: 0 the badge
-// background, aaSteps the glyph foreground.
+// aaSteps is coverage levels per edge pixel.
 const aaSteps = 4
 
-// aaLevels is the blends stored per foreground/background pair.
 const aaLevels = aaSteps - 1
 
 const (
@@ -58,19 +51,13 @@ const (
 	aaPairs
 )
 
-// smoothScale is the glyph scale where hard nearest-neighbour edges start
-// to read next to antialiased terminal text. Below it glyphs draw exactly
-// as before.
+// smoothScale is where glyphs switch to antialiased.
 const smoothScale = 3
 
-// dimAlpha is how far a ruled-out hint fades.
+// dimAlpha is how far ruled-out hints fade.
 const dimAlpha = 0xB0
 
-// newPalette derives every colour from the ones the terminal reported. The
-// badge takes the palette entry with the most contrast against the
-// background, so it survives light themes where yellow alone is a smudge.
-// The tail holds the edge blends a smoothed glyph is quantized into, one
-// ramp per foreground/background pair it can sit on.
+// newPalette derives badge colours from the terminal.
 func newPalette(c theme.Colors) color.Palette {
 	accent, _ := theme.BestAccent(c)
 	background := accent
@@ -102,8 +89,7 @@ func newPalette(c theme.Colors) color.Palette {
 	return palette
 }
 
-// aaIndex is the palette entry for an edge pixel covering level/aaSteps of
-// the foreground over the background.
+// aaIndex is the palette entry for an edge pixel.
 func aaIndex(dim, inverted bool, level int) uint8 {
 	var pair uint8
 	switch {
@@ -119,10 +105,7 @@ func aaIndex(dim, inverted bool, level int) uint8 {
 	return aaBase + pair*aaLevels + uint8(level-1)
 }
 
-// Badge is one hint code and the link it marks. Before is the blank cells
-// left of the link, Width the cells the link covers, Dim whether the typed
-// prefix has ruled it out, Typed how many leading code runes are already
-// typed.
+// Badge is one hint and its link.
 type Badge struct {
 	Row    int
 	Col    int
@@ -133,19 +116,19 @@ type Badge struct {
 	Typed  int
 }
 
-// Cell is the pixel size of a terminal cell, from pane.graphics.info.
+// Cell is a terminal cell in pixels.
 type Cell struct {
 	Width  int
 	Height int
 }
 
-// Size is a pane's viewport in cells.
+// Size is a viewport in cells.
 type Size struct {
 	Cols int
 	Rows int
 }
 
-// Scene is everything one pane's overlay is drawn from.
+// Scene is one pane's overlay inputs.
 type Scene struct {
 	Badges   []Badge
 	Colors   theme.Colors
@@ -153,7 +136,7 @@ type Scene struct {
 	Viewport Size
 }
 
-// Frame is an encoded overlay and the placement Herdr needs for it.
+// Frame is an encoded overlay plus placement.
 type Frame struct {
 	PNG    []byte
 	Width  int // pixels
@@ -164,11 +147,7 @@ type Frame struct {
 	Cols   int
 }
 
-// Plan is every badge resolved to the cells it will be drawn in. The
-// placement depends only on where the links are, never on which of them a
-// typed prefix still matches, so the whole-viewport frame and the
-// per-badge layers drawn from one plan agree on where every badge sits,
-// and a code goes on meaning the same link while the user narrows.
+// Plan resolves badges to cells; placement ignores Dim and Typed.
 type Plan struct {
 	placed   []placement
 	cell     Cell
@@ -193,18 +172,11 @@ func NewPlan(s Scene) (Plan, error) {
 	}, nil
 }
 
-// Placed is how many badges the plan found room for. A badge the viewport
-// could not hold is not one of them.
 func (p Plan) Placed() int { return len(p.placed) }
 
-// Link is the index into the badge slice the i-th placed badge came from.
 func (p Plan) Link(i int) int { return p.placed[i].source }
 
-// SameLinks reports whether badges mark the same links, in the same order,
-// as the ones this plan placed. Only Dim and Typed may differ. A plan
-// reused against anything else would draw a code that has already been
-// shown against one link on top of another, so a caller that gets false
-// builds a new plan instead.
+// SameLinks reports whether badges mark the same links.
 func (p Plan) SameLinks(badges []Badge) bool {
 	if len(badges) != len(p.links) {
 		return false
@@ -219,9 +191,7 @@ func (p Plan) SameLinks(badges []Badge) bool {
 	return true
 }
 
-// Frame is the whole viewport in one image: clear everywhere the badges and
-// their link boxes are not, so the pane reads exactly as it did before the
-// hints went up.
+// Frame renders the whole viewport.
 func (p Plan) Frame(badges []Badge) (Frame, error) {
 	img := image.NewPaletted(
 		image.Rect(0, 0, p.viewport.Cols*p.cell.Width, p.viewport.Rows*p.cell.Height),
@@ -238,12 +208,7 @@ func (p Plan) Frame(badges []Badge) (Frame, error) {
 	return p.encode(img, 0, 0, p.viewport.Rows, p.viewport.Cols)
 }
 
-// Layer draws one placed badge and its link box into the smallest image
-// that covers both, transparent everywhere else, so redrawing a badge
-// costs its own few thousand pixels rather than the viewport's twelve
-// million. The image is at the pane's real cell size: Herdr scales a layer
-// to the cells it declares and the terminal upscales with a linear filter,
-// so anything smaller would smear the badge's edges across a cell.
+// Layer draws one badge and its link box.
 func (p Plan) Layer(i int, badges []Badge) (Frame, error) {
 	pl := p.placed[i]
 	row := min(pl.row, pl.linkRow)
@@ -257,9 +222,7 @@ func (p Plan) Layer(i int, badges []Badge) (Frame, error) {
 	return p.encode(img, row, col, rows, cols)
 }
 
-// stateOf is how the badge a placement came from is drawn now. Badges the
-// plan has outlived leave it matched and untyped rather than failing: the
-// caller checks SameLinks when it matters.
+// stateOf is how a placed badge is drawn now.
 func (p Plan) stateOf(badges []Badge, pl placement) (dim bool, typed int) {
 	if pl.source < 0 || pl.source >= len(badges) {
 		return false, 0
@@ -288,8 +251,7 @@ func (p Plan) encode(img *image.Paletted, row, col, rows, cols int) (Frame, erro
 	}, nil
 }
 
-// Render is the whole viewport in one frame, for a caller with no reason
-// to keep the plan.
+// Render draws the whole viewport without keeping the plan.
 func Render(s Scene) (Frame, error) {
 	plan, err := NewPlan(s)
 	if err != nil {
@@ -298,8 +260,7 @@ func Render(s Scene) (Frame, error) {
 	return plan.Frame(s.Badges)
 }
 
-// checkSize guards the cap here rather than letting the RPC fail with less
-// to go on.
+// checkSize guards Herdr's frame cap.
 func checkSize(n int) error {
 	if n > maxFrameBytes {
 		return fmt.Errorf("overlay frame is %d bytes, over the %d Herdr accepts", n, maxFrameBytes)
@@ -307,10 +268,7 @@ func checkSize(n int) error {
 	return nil
 }
 
-// placement is a badge resolved to cells: row and col are the hint, link*
-// its link, source the badge it came from. Whether the badge is dimmed or
-// part-typed is not here on purpose - that changes on every keystroke and
-// the placement must not.
+// placement is a badge resolved to cells.
 type placement struct {
 	row     int
 	col     int
@@ -326,9 +284,7 @@ type point struct {
 	col int
 }
 
-// clip places each badge and drops one the viewport cannot hold. A placed
-// badge joins the cells the next one prefers to avoid, which thins
-// collisions; place still covers a taken cell as a defensive last resort.
+// clip places badges, dropping ones the viewport cannot hold.
 func clip(badges []Badge, viewport Size) []placement {
 	taken := linkCells(badges, viewport)
 	var out []placement
@@ -359,8 +315,7 @@ func clip(badges []Badge, viewport Size) []placement {
 	return out
 }
 
-// linkCells marks every cell a link covers, so a badge can be steered off
-// a neighbour's link.
+// linkCells marks cells links cover.
 func linkCells(badges []Badge, viewport Size) map[point]bool {
 	taken := map[point]bool{}
 	for _, b := range badges {
@@ -374,13 +329,7 @@ func linkCells(badges []Badge, viewport Size) map[point]bool {
 	return taken
 }
 
-// place keeps a hint off every link, not just the one it marks. The link's
-// own row comes first, flush against the link and working outward: a badge
-// against its link reads as belonging to it, and hiding a character of the
-// text beside it costs less than floating a row away from the box. Only
-// then the rows above and below, out to two away. Covering a link is the defensive last resort,
-// unreachable in a realistic pane: the walk finds a free cell long before
-// it runs out.
+// place keeps a hint off every link, covering one as a last resort.
 func place(b Badge, width int, viewport Size, taken map[point]bool) (row, col int) {
 	fallback := point{b.Row, fit(b.Col, width, viewport.Cols)}
 	seen := map[point]bool{}
@@ -413,10 +362,7 @@ func place(b Badge, width int, viewport Size, taken map[point]bool) (row, col in
 	return fallback.row, fallback.col
 }
 
-// besideLink is where a badge can sit on its link's own row, nearest first:
-// flush against the link on either side, then a cell or two further out.
-// Offsets are whole badge widths, so the badge lands beside the link rather
-// than half over it.
+// besideLink is badge slots on the link's row, nearest first.
 func besideLink(b Badge, width int, viewport Size) []int {
 	after := b.Col + max(b.Width, 1)
 	cols := []int{b.Col - width, after, b.Col - width - 1, after + 1, b.Col - width - 2, after + 2}
@@ -426,7 +372,7 @@ func besideLink(b Badge, width int, viewport Size) []int {
 	return cols
 }
 
-// fit slides a badge left so its whole code stays inside the pane.
+// fit slides a badge inside the pane.
 func fit(col, width, cols int) int {
 	return max(0, min(col, cols-width))
 }
@@ -446,9 +392,7 @@ func free(taken map[point]bool, at point, width int) bool {
 	return true
 }
 
-// boxLink ties a badge to its link however far apart they were placed. A box
-// rather than a rule beneath it: nothing dims the pane any more, and a link
-// only a few cells wide gets too little underline to read as marked.
+// boxLink ties a badge to its link.
 func boxLink(img *image.Paletted, p placement, cell Cell, dim bool) {
 	outline(img, cellRect(p.linkRow, p.linkCol, p.width, 1, cell),
 		badgeColor(dim, colorBorder, colorDimBorder), linkStroke)
@@ -457,9 +401,7 @@ func boxLink(img *image.Paletted, p placement, cell Cell, dim bool) {
 func drawBadge(img *image.Paletted, p placement, cell Cell, dim bool, typed int) {
 	box := cellRect(p.row, p.col, len(p.code), 1, cell)
 	fill(img, box, badgeColor(dim, colorBackground, colorDimBackground))
-	// The typed prefix reads as already entered: its cells are inverted
-	// against the rest of the badge, reusing the badge's own colours so no
-	// new palette entry is needed.
+	// Inverted prefix reads as typed.
 	for i := 0; i < typed; i++ {
 		fill(img, cellRect(p.row, p.col+i, 1, 1, cell),
 			badgeColor(dim, colorText, colorDimText))
@@ -508,12 +450,7 @@ func drawGlyph(img *image.Paletted, r rune, x, y int, cell Cell, fg uint8, dim, 
 	drawSmoothGlyph(img, bitmap, x, y, scale, fg, dim, inverted)
 }
 
-// drawSmoothGlyph covers each output pixel against the bitmap and writes
-// the quantized blend of the foreground over the background, so a scaled-up
-// glyph reads antialiased next to terminal text. The footprint carries a
-// half-pixel phase: at integer scales every edge would otherwise land on a
-// pixel boundary and no coverage could ever be fractional. At these sizes
-// the cost is nothing next to the PNG encode.
+// drawSmoothGlyph draws an antialiased scaled glyph.
 func drawSmoothGlyph(img *image.Paletted, bitmap [glyphHeight]byte, x, y, scale int, fg uint8, dim, inverted bool) {
 	w, h := glyphWidth*scale, glyphHeight*scale
 	for oy := 0; oy < h; oy++ {
@@ -539,9 +476,7 @@ func drawSmoothGlyph(img *image.Paletted, bitmap [glyphHeight]byte, x, y, scale 
 	}
 }
 
-// coverage is the fraction of the source-space rect the bitmap covers. The
-// half-pixel phase keeps rect edges off integer source coordinates, so the
-// overlap never needs an exact-boundary rule.
+// coverage is the bitmap fraction a rect covers.
 func coverage(bitmap [glyphHeight]byte, x0, x1, y0, y1 float64) float64 {
 	area := 0.0
 	for jy := int(y0); float64(jy) < y1; jy++ {
@@ -564,8 +499,7 @@ func coverage(bitmap [glyphHeight]byte, x0, x1, y0, y1 float64) float64 {
 	return area / ((x1 - x0) * (y1 - y0))
 }
 
-// glyphScale leaves a pixel of padding where the cell allows it, never
-// below scale 1.
+// glyphScale fits the cell with padding, minimum 1.
 func glyphScale(cell Cell) int {
 	return max(1, min((cell.Width-2)/glyphWidth, (cell.Height-2)/glyphHeight))
 }

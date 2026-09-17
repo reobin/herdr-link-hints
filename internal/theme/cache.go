@@ -8,12 +8,7 @@ import (
 	"time"
 )
 
-// cacheTTL bounds how long a saved reply is trusted. The key is only
-// TERM_PROGRAM, so a light/dark switch under the same program would
-// otherwise render with the wrong palette until the file is deleted.
-// A day keeps the 150ms probe skipped on most runs while capping the
-// stale window. HINTS_NO_THEME_CACHE set to a non-empty, non-zero value
-// skips the cache entirely for one run or for debugging.
+// cacheTTL bounds how long a saved reply is trusted.
 const cacheTTL = 24 * time.Hour
 
 func cachingDisabled() bool {
@@ -21,10 +16,7 @@ func cachingDisabled() bool {
 	return v != "" && v != "0"
 }
 
-// Load returns the colours a terminal with this program name reported on
-// an earlier run. An empty program, a missing file, and a corrupt file
-// all report a miss rather than an error: the caller falls back to asking
-// the terminal live.
+// Load returns colours from an earlier run, else a miss.
 func Load(program string) (Colors, bool) {
 	if cachingDisabled() {
 		return Colors{}, false
@@ -54,12 +46,7 @@ func Load(program string) (Colors, bool) {
 	return colors, true
 }
 
-// Save remembers a full live reply for the next run under this program
-// name. An empty program name saves nothing. Only call it with all five
-// colours parsed: Terminal.Theme starts from the fallback, so a partial
-// reply is indistinguishable here from a full one. A cache written before
-// the red and blue accents existed misses on load, so the next run
-// re-probes live once and then rides the cache again.
+// Save remembers a full live reply for the next run.
 func Save(program string, colors Colors) error {
 	if cachingDisabled() {
 		return nil
@@ -108,9 +95,7 @@ func opaque(c Colors) bool {
 		c.Accent.A == 0xFF && c.AccentBlue.A == 0xFF
 }
 
-// cachePath resolves where this program's reply lives. The second result
-// is false when there is nowhere to put it: an empty program name, a
-// name with nothing file-safe in it, or no cache directory.
+// cachePath resolves where a program's reply lives.
 func cachePath(program string) (string, bool) {
 	key := sanitize(program)
 	if key == "" {
@@ -123,9 +108,7 @@ func cachePath(program string) (string, bool) {
 	return filepath.Join(dir, "herdr-link-hints", "theme-"+key+".json"), true
 }
 
-// sanitize keeps the key to one file-safe segment: anything outside
-// letters, digits, dot, dash, and underscore becomes an underscore, so a
-// hostile TERM_PROGRAM cannot escape the cache directory.
+// sanitize keeps the key to one file-safe segment.
 func sanitize(program string) string {
 	var b strings.Builder
 	for _, r := range program {

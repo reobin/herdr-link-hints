@@ -61,10 +61,7 @@ func realScene(badges int) Scene {
 	return s
 }
 
-// BenchmarkNarrowByFrame and BenchmarkNarrowByLayer are the two costs one
-// keystroke can have: re-encoding the whole viewport, or redrawing only
-// the badges that still match. The gap between them is the reason the
-// layered path exists.
+// The two per-keystroke costs: full frame vs badge layers.
 func BenchmarkNarrowByFrame(b *testing.B) {
 	s := realScene(150)
 	plan, err := NewPlan(s)

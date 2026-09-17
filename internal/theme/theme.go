@@ -1,5 +1,4 @@
-// Package theme reads the colours the terminal is painted in, so the
-// overlay borrows the user's palette.
+// Package theme reads terminal colours for the overlay.
 package theme
 
 import (
@@ -9,9 +8,7 @@ import (
 	"strings"
 )
 
-// OSC report keys: 10 is the default foreground, 11 the background, 4;1
-// the palette's red, 4;3 its yellow, 4;4 its blue. The badge background is
-// whichever of the three reads best against the background.
+// OSC report keys; the badge uses whichever accent contrasts best.
 const (
 	KeyForeground = "10"
 	KeyBackground = "11"
@@ -23,8 +20,7 @@ const (
 // Keys is every colour the overlay asks for.
 var Keys = []string{KeyForeground, KeyBackground, KeyAccentRed, KeyAccent, KeyAccentBlue}
 
-// MinBadgeContrast is the floor for a readable badge: below 3:1 the badge
-// is a smudge, so tests treat it as a bug.
+// MinBadgeContrast is the readable floor.
 const MinBadgeContrast = 3.0
 
 // Query is the escape sequence that asks for one colour.
@@ -38,7 +34,7 @@ type Colors struct {
 	AccentBlue color.RGBA
 }
 
-// Fallback is what a terminal that answers nothing gets.
+// Fallback is a terminal that answers nothing.
 func Fallback() Colors {
 	return Colors{
 		Foreground: Opaque(color.White),
@@ -64,10 +60,7 @@ func (c *Colors) Set(key string, rgb color.RGBA) {
 	}
 }
 
-// BestAccent picks the palette entry with the most contrast against the
-// background. Yellow wins on dark themes; on light ones red or blue does.
-// A partial reply leaves an alternate at the fallback white, which scores
-// low on a light background and loses on merit, so no special-casing.
+// BestAccent picks the accent contrasting most with the background.
 func BestAccent(c Colors) (color.RGBA, float64) {
 	best, bestScore := c.Accent, Contrast(c.Accent, c.Background)
 	if score := Contrast(c.AccentRed, c.Background); score > bestScore {
@@ -79,7 +72,7 @@ func BestAccent(c Colors) (color.RGBA, float64) {
 	return best, bestScore
 }
 
-// Contrast is the WCAG contrast ratio of two opaque colours.
+// Contrast is the WCAG ratio of two opaque colours.
 func Contrast(a, b color.RGBA) float64 {
 	la, lb := luminance(a), luminance(b)
 	if la < lb {
@@ -99,8 +92,7 @@ func luminance(c color.RGBA) float64 {
 	return 0.2126*linear(c.R) + 0.7152*linear(c.G) + 0.0722*linear(c.B)
 }
 
-// Parse reads one OSC colour report. Components come back as hex of any
-// width, so rgb:1e/1e/2e and rgb:1e1e/1e1e/2e2e are the same colour.
+// Parse reads one OSC colour report.
 func Parse(reply string) (key string, rgb color.RGBA, ok bool) {
 	body, found := strings.CutPrefix(reply, "\x1b]")
 	if !found {
@@ -136,7 +128,7 @@ func component(s string) (uint8, bool) {
 	return uint8((v*0xFF + full/2) / full), true
 }
 
-// Mix moves a toward b by the given fraction.
+// Mix moves a toward b by a fraction.
 func Mix(a, b color.RGBA, toward float64) color.RGBA {
 	return color.RGBA{
 		R: blend(a.R, b.R, toward),
@@ -150,7 +142,7 @@ func blend(a, b uint8, toward float64) uint8 {
 	return uint8(float64(a)*(1-toward) + float64(b)*toward + 0.5)
 }
 
-// Fade returns c at the given alpha, premultiplied as image/color expects.
+// Fade returns c at an alpha, premultiplied.
 func Fade(c color.RGBA, alpha uint8) color.RGBA {
 	scale := func(v uint8) uint8 { return uint8(uint32(v) * uint32(alpha) / 0xFF) }
 	return color.RGBA{R: scale(c.R), G: scale(c.G), B: scale(c.B), A: alpha}
