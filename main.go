@@ -493,14 +493,16 @@ func activate(ctx context.Context, client *herdr.Client, choice links.Link, row,
 }
 
 // target trusts Herdr's resolved URL over the one we read off screen, but
-// only a handled result counts as already opened.
+// only a handled result counts as already opened. It normalizes what comes
+// back: a bare host is a link we hint now, so Herdr can resolve a cell to one
+// and browse would refuse to open it.
 func target(result herdr.Activation, err error, fallback string) (string, bool) {
 	if err != nil {
 		return fallback, false
 	}
 	url := fallback
 	if result.URL != "" {
-		url = result.URL
+		url = links.Normalize(result.URL)
 	}
 	return url, result.Handled
 }
