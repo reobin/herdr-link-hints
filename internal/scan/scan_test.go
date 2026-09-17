@@ -197,7 +197,7 @@ func TestLocate(t *testing.T) {
 		},
 		{
 			name:    "confirms a soft-wrapped url past a zero-width rune",
-			visible: []string{"a‍https://a.io/long-ur", "l-continued here"},
+			visible: []string{"a\u200dhttps://a.io/long-ur", "l-continued here"},
 			choice:  links.Link{URL: "https://a.io/long-url-continued", Text: "https://a.io/long-url-continued", Kind: links.Text, Row: 0, Col: 1},
 			wantRow: 0, wantCol: 1, wantOK: true,
 		},
