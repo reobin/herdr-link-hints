@@ -1,7 +1,10 @@
 package links
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/reobin/herdr-link-hints/internal/ansi"
@@ -310,5 +313,224 @@ func TestMergeSkipsAnchorInsideLongerText(t *testing.T) {
 	got := Merge(lines, nil, hidden)
 	if len(got) != 1 || got[0].Row != 0 || got[0].Col != 0 {
 		t.Fatalf("Merge() = %+v, want only the standalone #1", got)
+	}
+}
+
+func TestFindAllBareHostsAndRemotes(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ line, want string }{
+		{"see github.com/reobin/herdr for the source", "github.com/reobin/herdr"},
+		{"docs at herdr.dev", "herdr.dev"},
+		{"a.co.uk is a host", "a.co.uk"},
+		{"serving example.com:8080/x now", "example.com:8080/x"},
+		{"origin git@github.com:reobin/herdr-link-hints.git (fetch)", "git@github.com:reobin/herdr-link-hints.git"},
+		{"clone git@github.com:1Password/connect.git", "git@github.com:1Password/connect.git"},
+		{"visit WWW.EXAMPLE.COM today", "WWW.EXAMPLE.COM"},
+		{"remote: git@gitlab.com:group/sub/proj.git", "git@gitlab.com:group/sub/proj.git"},
+		{"a.b.c.d.example.com/deep/path?q=1#frag here", "a.b.c.d.example.com/deep/path?q=1#frag"},
+		{"(github.com/reobin/herdr)", "github.com/reobin/herdr"},
+		{"see example.com.", "example.com"},
+	}
+	for _, tc := range tests {
+		found := FindAll(tc.line)
+		if len(found) != 1 || found[0].URL != tc.want {
+			t.Errorf("FindAll(%q) = %+v, want one match %q", tc.line, found, tc.want)
+		}
+	}
+}
+
+// The TLD gate exists for this list. A terminal shows far more filenames,
+// versions and field accesses than links, and every one of them is shaped
+// like a two-label host.
+func TestFindAllRejectsWhatIsNotALink(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		"go build ./main.go",
+		"upgraded to v1.2.3 today",
+		"listening on 1.2.3.4",
+		"run ./install.sh first",
+		"edit lib.rs and main.tf",
+		"open README.md",
+		"copy id_rsa.pub across",
+		"if got := Width(tc.in); got != tc.want {",
+		"reported by pane.graphics.info",
+		"defer c.run()",
+		"read user.id from the span",
+		"last := arr.at(0)",
+		"threw java.io.IOException",
+		"bundled index.dev.js",
+		"loaded app.config.dev.json",
+		"vim src/index.dev",
+		"cat ./config.io",
+		"mail robin@example.com about it",
+		"ssh: connect to git@host:22 failed",
+		"scp git@host:~/notes .",
+		"prose, e.g. this sentence",
+		"AddOnsOverviewPage.tsx:25:59",
+		"pnpm add @types/react-router",
+		"package.json and tsconfig.json",
+		"Cargo.toml docker-compose.yml .env.local",
+		"172.17.0.2:5432 and localhost:3000",
+		"cannot find module 'foo.bar'",
+		"System.IO.Path.Combine(a, b)",
+		"console.log(res.data.items)",
+		"os.path.join(a, b)",
+		"ssh -T git@github.com",
+	}
+	for _, tc := range lines {
+		if found := FindAll(tc); len(found) != 0 {
+			t.Errorf("FindAll(%q) = %+v, want no matches", tc, found)
+		}
+	}
+}
+
+// \b is an ASCII word boundary, so it leaves both ends of a bare host open.
+func TestFindAllBoundsAHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		line string
+		want []string
+	}{
+		{"a non-ascii neighbour is still a neighbour", "bücher.de sells books", nil},
+		{"a trailing dot ends the sentence", "read example.com.", []string{"example.com"}},
+		{"a hyphen continues the token", "example.com-backup exists", nil},
+		{"a dotted suffix continues the token", "java.io.IOException thrown", nil},
+		{"a path is not a host", "vim src/index.dev", nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, m := range FindAll(tc.line) {
+				got = append(got, m.URL)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("FindAll(%q) = %+v, want %+v", tc.line, got, tc.want)
+			}
+		})
+	}
+}
+
+// The www. branch stays ahead of the bare host, and skips the boundary
+// filters, so both the extent and the placement it has always had survive.
+func TestFindAllKeepsTheWwwBranchWinning(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ line, want string }{
+		{"see www.example.com/a) here", "www.example.com/a"},
+		{"contact me@www.example.com:8080", "www.example.com:8080"},
+	}
+	for _, tc := range tests {
+		found := FindAll(tc.line)
+		if len(found) != 1 || found[0].URL != tc.want {
+			t.Errorf("FindAll(%q) = %+v, want one match %q", tc.line, found, tc.want)
+		}
+	}
+}
+
+func TestNormalizeShapes(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ in, want string }{
+		{"www.x.io/a", "https://www.x.io/a"},
+		{"https://x.io", "https://x.io"},
+		{"github.com/reobin/herdr", "https://github.com/reobin/herdr"},
+		{"herdr.dev", "https://herdr.dev"},
+		{"example.com:8080/x", "https://example.com:8080/x"},
+		{"git@github.com:reobin/herdr-link-hints.git", "https://github.com/reobin/herdr-link-hints"},
+		{"git@github.com:reobin/herdr", "https://github.com/reobin/herdr"},
+		// Normalize runs over every OSC 8 target too, and those carry
+		// schemes that are none of our business.
+		{"mailto:a@b.io", "mailto:a@b.io"},
+		{"vscode://file/x", "vscode://file/x"},
+		{"x-man-page://ls", "x-man-page://ls"},
+		{"not a link at all", "not a link at all"},
+	}
+	for _, tc := range tests {
+		got := Normalize(tc.in)
+		if got != tc.want {
+			t.Errorf("Normalize(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		// Locate re-reads the screen and normalizes again to find a link
+		// it already stored, so the second pass has to be a no-op.
+		if again := Normalize(got); again != got {
+			t.Errorf("Normalize(Normalize(%q)) = %q, want %q", tc.in, again, got)
+		}
+	}
+}
+
+// A real eslint dump is the corpus the gate has to survive: paths, versions,
+// package specs and field accesses, and not one link.
+func TestFindAllOnAPaneOfToolOutput(t *testing.T) {
+	t.Parallel()
+	pane, err := os.ReadFile(filepath.Join("..", "scan", "testdata", "pane.txt"))
+	if err != nil {
+		t.Fatalf("read pane: %v", err)
+	}
+	for i, line := range strings.Split(string(pane), "\n") {
+		if found := FindAll(line); len(found) != 0 {
+			t.Errorf("line %d %q: FindAll() = %+v, want no matches", i+1, line, found)
+		}
+	}
+}
+
+// Past the cap the anchor sweep is guessing at which eight of many cells to
+// mark, so a replay coordinate the snapshot agrees with wins instead.
+func TestMergePrefersAVerifiedReplayCellPastTheCap(t *testing.T) {
+	t.Parallel()
+	flood := func(line string) []string {
+		lines := make([]string, 40)
+		for i := range lines {
+			lines[i] = line
+		}
+		return lines
+	}
+	cases := []struct {
+		name  string
+		lines []string
+		at    ansi.Link
+		want  int
+	}{
+		{
+			name:  "the cell the snapshot agrees with",
+			lines: flood("see #2 here"),
+			at:    ansi.Link{URL: "https://g.io/pull/2", Row: 0, Col: 4, Label: "#2"},
+			want:  1,
+		},
+		{
+			name:  "a cell the snapshot puts elsewhere",
+			lines: flood("see #2 here"),
+			at:    ansi.Link{URL: "https://g.io/pull/2", Row: 0, Col: 0, Label: "#2"},
+			want:  maxAnchorHits,
+		},
+		{
+			name:  "a row off the bottom of the snapshot",
+			lines: flood("see #2 here"),
+			at:    ansi.Link{URL: "https://g.io/pull/2", Row: 99, Col: 4, Label: "#2"},
+			want:  maxAnchorHits,
+		},
+		{
+			name:  "a column inside a wide rune",
+			lines: flood("日#2 here"),
+			at:    ansi.Link{URL: "https://g.io/pull/2", Row: 0, Col: 1, Label: "#2"},
+			want:  maxAnchorHits,
+		},
+		{
+			name:  "a column inside a longer run of text",
+			lines: flood("#1 and #123"),
+			at:    ansi.Link{URL: "https://g.io/pull/1", Row: 0, Col: 7, Label: "#1"},
+			want:  maxAnchorHits,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := Merge(tc.lines, nil, []ansi.Link{tc.at})
+			if len(got) != tc.want {
+				t.Fatalf("Merge() marked %d cells, want %d", len(got), tc.want)
+			}
+			if tc.want == 1 && (got[0].Row != tc.at.Row || got[0].Col != tc.at.Col) {
+				t.Fatalf("Merge() = %+v, want row %d col %d", got[0], tc.at.Row, tc.at.Col)
+			}
+		})
 	}
 }

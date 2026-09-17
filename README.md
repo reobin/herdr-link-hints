@@ -1,8 +1,8 @@
 # herdr-link-hints
 
 Vimium-style keyboard link hints for [Herdr](https://herdr.dev).
-Tap a key, get a hint code drawn beside every link on screen, type the
-code to open it.
+Tap a key, get a hint code drawn beside the links on screen, type the
+code to open one.
 
 ## Install
 
@@ -26,13 +26,28 @@ description = "hint links in focused pane"
 
 ## Use
 
-Press the bound key. Every link on screen is boxed and gets a hint code
-beside it. Type the code; hints that no longer match fade, and the
+Press the bound key. Links on screen are boxed and get a hint code
+beside them. Type the code; hints that no longer match fade, and the
 match opens as soon as it is unambiguous. Backspace edits, Enter opens a
 single match, Esc quits.
 
 A small popup shows how many hints are left, and says `no match` when a
 prefix has ruled them all out.
+
+What gets a hint:
+
+* a URL with a scheme: `https`, `http`, `ftp`, `file`, `mailto`
+* a `www.` host
+* a bare host on a known TLD, like `github.com/reobin/herdr` or
+  `herdr.dev`
+* an ssh remote, like `git@github.com:reobin/herdr-link-hints.git`, which
+  opens its https form
+* a terminal hyperlink (OSC 8), wherever its text sits
+
+The TLD list is deliberately short. It leaves out every name that is also
+a common file extension or a common field name, so `install.sh`,
+`lib.rs`, `README.md` and `log.info` stay unmarked. A host on a name it
+leaves out gets no hint, and neither does `localhost:3000` or a bare IP.
 
 ![demo](docs/demo.gif)
 
