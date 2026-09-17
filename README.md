@@ -13,6 +13,15 @@ on arm64 and amd64; no toolchain required.
 herdr plugin install reobin/herdr-link-hints
 ```
 
+Every release binary carries a signed build provenance attestation. The
+installed binary is `picker`, in the plugin directory; check where it came
+from with:
+
+```sh
+gh attestation verify ./picker --repo reobin/herdr-link-hints \
+  --signer-workflow reobin/herdr-link-hints/.github/workflows/release.yml
+```
+
 Bind a key in `~/.config/herdr/config.toml`, then
 `herdr server reload-config`:
 
@@ -49,3 +58,7 @@ herdr plugin link /path/to/herdr-link-hints
 | `HINTS_NO_OBSERVE`     | unset   | skip the observe stream when set                 |
 | `HINTS_NO_THEME_CACHE` | unset   | skip the theme cache and probe the terminal live |
 | `HINTS_DEBUG`          | unset   | log to stderr, or to the named file              |
+
+## License
+
+[MIT](LICENSE).

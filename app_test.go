@@ -141,19 +141,33 @@ func TestPaneIDs(t *testing.T) {
 
 // fakeClient answers the Herdr calls both flows make, recording the writes.
 type fakeClient struct {
-	mu       sync.Mutex
-	lines    map[string][]string
-	panes    []herdr.Pane
-	scrolls  map[string]herdr.Scroll
-	infos    map[string]herdr.Graphics
-	opened   []herdr.PaneOpen
-	openErr  error
-	set      []string
-	cleared  []string
-	activate herdr.Activation
+	mu sync.Mutex
+	// rescan, when set, answers every read after the first, so a test can
+	// scroll the pane out from under a scan.
+	lines       map[string][]string
+	rescan      map[string][]string
+	reads       int
+	panes       []herdr.Pane
+	panesErr    error
+	scrolls     map[string]herdr.Scroll
+	scrollsErr  error
+	scrollErr   error
+	infos       map[string]herdr.Graphics
+	opened      []herdr.PaneOpen
+	openErr     error
+	set         []string
+	cleared     []string
+	activate    herdr.Activation
+	activateErr error
 }
 
 func (f *fakeClient) PaneLines(_ context.Context, pane string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads++
+	if f.rescan != nil && f.reads > 1 {
+		return f.rescan[pane], nil
+	}
 	return f.lines[pane], nil
 }
 
@@ -162,14 +176,23 @@ func (f *fakeClient) ObserveOSC8(context.Context, string, int, int) ([]ansi.Link
 }
 
 func (f *fakeClient) ScreenPanes(context.Context, string) ([]herdr.Pane, error) {
+	if f.panesErr != nil {
+		return nil, f.panesErr
+	}
 	return f.panes, nil
 }
 
 func (f *fakeClient) PaneScrolls(context.Context) (map[string]herdr.Scroll, error) {
+	if f.scrollsErr != nil {
+		return nil, f.scrollsErr
+	}
 	return f.scrolls, nil
 }
 
 func (f *fakeClient) PaneScroll(_ context.Context, pane string) (herdr.Scroll, error) {
+	if f.scrollErr != nil {
+		return herdr.Scroll{}, f.scrollErr
+	}
 	return f.scrolls[pane], nil
 }
 
@@ -178,7 +201,7 @@ func (f *fakeClient) GraphicsInfos(context.Context, []string) map[string]herdr.G
 }
 
 func (f *fakeClient) ActivateLink(context.Context, string, int, int) (herdr.Activation, error) {
-	return f.activate, nil
+	return f.activate, f.activateErr
 }
 
 func (f *fakeClient) OpenPane(_ context.Context, p herdr.PaneOpen) (string, error) {
@@ -227,15 +250,20 @@ func testApp(t *testing.T, f *fakeClient, cfg config.Config) *app {
 	return &app{cfg: cfg, log: slog.New(slog.DiscardHandler), client: f}
 }
 
+// A cold theme cache is the CI case: no drawing, just the handoff.
 func TestOpenHandsTheScanToThePickerPane(t *testing.T) {
 	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
+	themeEnv(t)
 	f := newFakeClient("see https://a.io/x for more")
 	cfg := config.Load()
-	cfg.StateDir = t.TempDir()
+	cfg.StateDir, cfg.TermProgram = t.TempDir(), "test-cold"
 	a := testApp(t, f, cfg)
 
 	if code := a.open(context.Background()); code != exitOK {
 		t.Fatalf("open() = %d, want %d", code, exitOK)
+	}
+	if set, _ := f.seen(); len(set) != 0 {
+		t.Fatal("a cold theme cache should have left the drawing to the picker pane")
 	}
 	if len(f.opened) != 1 {
 		t.Fatalf("open() asked for %d panes, want 1", len(f.opened))
@@ -360,10 +388,256 @@ func pipeTerminal(t *testing.T, typed string) (*ui.Terminal, *bytes.Buffer) {
 	return ui.Open(reader, &out), &out
 }
 
+// noPaneEnv silences every source config reads a focused pane from.
+func noPaneEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("HERDR_ACTIVE_PANE_ID", "")
+	t.Setenv("HERDR_PANE_ID", "")
+	t.Setenv("HERDR_PLUGIN_CONTEXT_JSON", "")
+}
+
 // themeEnv gives a test its own cache directory.
 func themeEnv(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+}
+
+func TestPaneSpec(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		cfg        config.Config
+		wantSize   bool
+		wantDebug  string
+		wantPlaced string
+	}{
+		{
+			name:       "a popup carries the configured size",
+			cfg:        config.Config{Placement: "popup", Width: "14", Height: "5"},
+			wantSize:   true,
+			wantPlaced: "popup",
+		},
+		{
+			name:       "any other placement reflows, so it takes no size",
+			cfg:        config.Config{Placement: "right", Width: "14", Height: "5"},
+			wantPlaced: "right",
+		},
+		{
+			name:       "debug crosses into the pane process",
+			cfg:        config.Config{Placement: "popup", Width: "14", Height: "5", Debug: "debug.log"},
+			wantSize:   true,
+			wantDebug:  "debug.log",
+			wantPlaced: "popup",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			spec := (&app{cfg: tc.cfg}).paneSpec()
+			if spec.Plugin != pluginID || spec.Entrypoint != entrypoint {
+				t.Fatalf("paneSpec() = %q/%q, want %q/%q", spec.Plugin, spec.Entrypoint, pluginID, entrypoint)
+			}
+			if spec.Placement != tc.wantPlaced {
+				t.Fatalf("paneSpec() placement = %q, want %q", spec.Placement, tc.wantPlaced)
+			}
+			gotSize := spec.Width != "" || spec.Height != ""
+			if gotSize != tc.wantSize {
+				t.Fatalf("paneSpec() size = %sx%s, want size: %v", spec.Width, spec.Height, tc.wantSize)
+			}
+			if got := spec.Env["HINTS_DEBUG"]; got != tc.wantDebug {
+				t.Fatalf("paneSpec() HINTS_DEBUG = %q, want %q", got, tc.wantDebug)
+			}
+		})
+	}
+}
+
+// pane.list is allowed to miss a pane; pane.get fills the gap.
+func TestScrollsForReadsThePanesPaneListMissed(t *testing.T) {
+	t.Parallel()
+	f := newFakeClient()
+	f.scrolls = map[string]herdr.Scroll{
+		"w1:p1": {ViewportRows: 24, Offset: 3},
+		"w1:p2": {ViewportRows: 24, Offset: 7},
+	}
+	a := testApp(t, f, config.Config{})
+
+	listed := map[string]herdr.Scroll{"w1:p1": {ViewportRows: 24, Offset: 3}}
+	got := a.scrollsFor(context.Background(), []string{"w1:p1", "w1:p2"}, listed)
+
+	want := map[string]herdr.Scroll{
+		"w1:p1": {ViewportRows: 24, Offset: 3},
+		"w1:p2": {ViewportRows: 24, Offset: 7},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scrollsFor() = %+v, want %+v", got, want)
+	}
+}
+
+func TestScrollsForKeepsAPaneAFailedReadCouldNotAnswer(t *testing.T) {
+	t.Parallel()
+	f := newFakeClient()
+	f.scrollErr = errors.New("no socket")
+	a := testApp(t, f, config.Config{})
+
+	got := a.scrollsFor(context.Background(), []string{"w1:p1", "w1:p2"}, nil)
+
+	want := map[string]herdr.Scroll{"w1:p1": {}, "w1:p2": {}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("scrollsFor() = %+v, want a zero scroll per pane", got)
+	}
+}
+
+func TestGrownByTreatsAFailedReadAsNoGrowth(t *testing.T) {
+	t.Parallel()
+	f := newFakeClient()
+	f.scrollErr = errors.New("no socket")
+	a := testApp(t, f, config.Config{})
+
+	before := map[string]herdr.Scroll{"w1:p1": {Offset: 4}}
+	if got := a.grownBy(context.Background(), "w1:p1", before); got != 0 {
+		t.Fatalf("grownBy() = %d, want 0", got)
+	}
+}
+
+func TestActivateFallsBackWhenTheCallFails(t *testing.T) {
+	t.Parallel()
+	f := newFakeClient()
+	f.activate = herdr.Activation{URL: "https://resolved.io/x", Handled: true}
+	f.activateErr = errors.New("no socket")
+	a := testApp(t, f, config.Config{})
+
+	url, handled := a.activate(context.Background(), links.Link{Pane: "w1:p1", URL: "https://typed.io/x"}, 1, 1)
+	if url != "https://typed.io/x" || handled {
+		t.Fatalf("activate() = %q/%v, want the url we read off screen and no handoff", url, handled)
+	}
+}
+
+// A layout or list failure degrades to a one-pane scan, not a crash.
+func TestGatherSurvivesALayoutFailure(t *testing.T) {
+	t.Parallel()
+	f := newFakeClient("see https://a.io/x for more")
+	f.panesErr = errors.New("no layout")
+	f.scrollsErr = errors.New("no list")
+	a := testApp(t, f, config.Config{})
+
+	p := a.gather(context.Background(), "w1:p1")
+	if p.Focused != "w1:p1" {
+		t.Fatalf("gather() focused = %q, want w1:p1", p.Focused)
+	}
+	if len(p.Panes) != 0 || len(p.Scrolls) != 0 {
+		t.Fatalf("gather() = %+v, want nothing where the calls failed", p)
+	}
+}
+
+func TestPrepareStopsWithoutAFocusedPane(t *testing.T) {
+	noPaneEnv(t)
+	f := newFakeClient("see https://a.io/x for more")
+	cfg := config.Load()
+	cfg.StateDir = t.TempDir()
+	a := testApp(t, f, cfg)
+
+	env := map[string]string{}
+	marker, drew := a.prepare(context.Background(), env)
+	if marker != nil || drew {
+		t.Fatalf("prepare() = %v/%v, want nothing without a pane", marker, drew)
+	}
+	if len(env) != 0 {
+		t.Fatalf("prepare() left %+v on the environment", env)
+	}
+}
+
+// An unwritable state dir is not fatal: the picker rescans for itself.
+func TestPrepareLeavesNoHandoffItCouldNotWrite(t *testing.T) {
+	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
+	themeEnv(t)
+	dir := filepath.Join(t.TempDir(), "state")
+	if err := os.Mkdir(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	f := newFakeClient("see https://a.io/x for more")
+	cfg := config.Load()
+	cfg.StateDir, cfg.TermProgram = dir, "test-unwritable"
+	a := testApp(t, f, cfg)
+
+	env := map[string]string{}
+	if _, drew := a.prepare(context.Background(), env); drew {
+		t.Fatal("prepare() claimed a drawing it could not have made")
+	}
+	if _, ok := env[handoff.EnvVar]; ok {
+		t.Fatalf("prepare() pointed the pane at a handoff it never wrote: %+v", env)
+	}
+}
+
+func TestPickStopsWhenNothingNamesAPane(t *testing.T) {
+	noPaneEnv(t)
+	f := newFakeClient("see https://a.io/x for more")
+	cfg := config.Load()
+	cfg.StateDir = t.TempDir()
+	a := testApp(t, f, cfg)
+
+	term, out := pipeTerminal(t, "a\n")
+	if code := a.pick(context.Background(), term, theme.Fallback); code != exitCancelled {
+		t.Fatalf("pick() = %d, want %d", code, exitCancelled)
+	}
+	term.Close()
+	if got := out.String(); !strings.Contains(got, "no pane") {
+		t.Fatalf("pick() said %q, want it to say there was no pane", got)
+	}
+}
+
+// An unmatched code is a quit, not a failure.
+func TestPickCancelsOnACodeThatMatchesNothing(t *testing.T) {
+	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
+	f := newFakeClient("see https://a.io/x for more")
+	cfg := config.Load()
+	cfg.StateDir = t.TempDir()
+	a := testApp(t, f, cfg)
+
+	term, _ := pipeTerminal(t, "zz\n")
+	if code := a.pick(context.Background(), term, theme.Fallback); code != exitCancelled {
+		t.Fatalf("pick() = %d, want %d", code, exitCancelled)
+	}
+	term.Close()
+}
+
+// Scrolled away between the scan and the pick, the link is gone.
+func TestPickFailsWhenTheLinkMovedOffScreen(t *testing.T) {
+	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
+	f := newFakeClient("see https://a.io/x for more")
+	f.rescan = map[string][]string{"w1:p1": {"nothing here now"}}
+	cfg := config.Load()
+	cfg.StateDir = t.TempDir()
+	a := testApp(t, f, cfg)
+
+	term, out := pipeTerminal(t, "a\n")
+	if code := a.pick(context.Background(), term, theme.Fallback); code != exitFailed {
+		t.Fatalf("pick() = %d, want %d", code, exitFailed)
+	}
+	term.Close()
+	if got := out.String(); !strings.Contains(got, "scrolled") {
+		t.Fatalf("pick() said %q, want it to say the pane scrolled", got)
+	}
+}
+
+// browse refuses an unsupported scheme before it launches anything.
+func TestPickFailsWhenTheBrowserRefusesTheURL(t *testing.T) {
+	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
+	f := newFakeClient("see https://a.io/x for more")
+	f.activate = herdr.Activation{URL: "gopher://a.io/x"}
+	cfg := config.Load()
+	cfg.StateDir = t.TempDir()
+	a := testApp(t, f, cfg)
+
+	term, out := pipeTerminal(t, "a\n")
+	if code := a.pick(context.Background(), term, theme.Fallback); code != exitFailed {
+		t.Fatalf("pick() = %d, want %d", code, exitFailed)
+	}
+	term.Close()
+	if got := out.String(); !strings.Contains(got, "failed") {
+		t.Fatalf("pick() said %q, want it to report the failure", got)
+	}
 }

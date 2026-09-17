@@ -44,7 +44,9 @@ func run(args []string) int {
 	}
 	switch mode {
 	case "--demo":
-		return runDemo()
+		term := ui.Open(os.Stdin, os.Stdout)
+		defer term.Close()
+		return runDemo(term)
 	case "--open":
 		ctx, stop, a := start()
 		defer stop()
@@ -74,10 +76,7 @@ func start() (context.Context, context.CancelFunc, *app) {
 	}
 }
 
-func runDemo() int {
-	term := ui.Open(os.Stdin, os.Stdout)
-	defer term.Close()
-
+func runDemo(term *ui.Terminal) int {
 	found := demo.Ranked()
 	codes := demo.Codes()
 	var renderErr error

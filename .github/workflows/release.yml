@@ -5,7 +5,10 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: write # gh release create
+  actions: read # read the ci runs for this sha
+  id-token: write # attestation signing
+  attestations: write # attestation upload
 
 jobs:
   release:
@@ -17,6 +20,37 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
+
+      # A tag is the only trigger here, and tags run no checks of their own, so
+      # the gate is ci's verdict on the commit the tag points at. A commit that
+      # never got a run is a failure, not a pass.
+      - name: require green ci for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 40); do
+            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100")"
+            if [ "$(jq -r '.total_count' <<<"$runs")" -eq 0 ]; then
+              echo "waiting for ci to start for $GITHUB_SHA"
+              sleep 15
+              continue
+            fi
+            pending="$(jq -r '[.workflow_runs[] | select(.status != "completed")] | length' <<<"$runs")"
+            if [ "$pending" -gt 0 ]; then
+              echo "waiting for $pending ci run(s) to finish"
+              sleep 15
+              continue
+            fi
+            bad="$(jq -r '[.workflow_runs[] | select(.conclusion != "success") | .conclusion] | join(",")' <<<"$runs")"
+            if [ -n "$bad" ]; then
+              echo "ci for $GITHUB_SHA concluded: $bad" >&2
+              exit 1
+            fi
+            echo "ci is green for $GITHUB_SHA"
+            exit 0
+          done
+          echo "timed out waiting for ci on $GITHUB_SHA" >&2
+          exit 1
 
       # install.sh derives the download URL from the manifest version, so a
       # mismatch here would ship a release nobody can install.
@@ -44,6 +78,12 @@ jobs:
             GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags="-s -w" -o "dist/picker-$os-$arch" .
           done
           cd dist && sha256sum picker-* > checksums.txt
+
+      # checksums.txt catches a corrupted download; only this catches a
+      # release that was never built from this repo.
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/picker-*
 
       - name: publish
         env:
