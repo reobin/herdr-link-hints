@@ -167,11 +167,8 @@ func TestPickByLine(t *testing.T) {
 // matches. Nothing else on screen repeats it.
 func TestRenderStatusShowsTypedAndCount(t *testing.T) {
 	t.Parallel()
-	list := items("aa", "as", "ad")
-	opts := Options{Alphabet: "asdfghjkl"}
-
 	term, out := keyTerminal(t, nil)
-	term.render(list, indices(list)[:2], "a", opts)
+	term.renderStatus(2, "a")
 	term.Flush()
 	rows := drawnRows(out.String())
 	if len(rows) != 2 {
@@ -187,12 +184,12 @@ func TestRenderStatusShowsTypedAndCount(t *testing.T) {
 	// Before the first keystroke the echo row is blank, and the count has
 	// not moved.
 	term, out = keyTerminal(t, nil)
-	term.render(list, indices(list), "", opts)
+	term.renderStatus(3, "")
 	term.Flush()
 	if rows := drawnRows(out.String()); len(rows) != 1 || rows[0] != "3 links" {
 		t.Fatalf("untyped pane = %q, want the count alone", rows)
 	}
-	if before, after := countRow(out.String()), countRow(typedOut(t, list, opts)); before != after {
+	if before, after := countRow(out.String()), countRow(typedOut(t)); before != after {
 		t.Fatalf("the count moved from row %d to %d when typing started", before, after)
 	}
 }
@@ -200,8 +197,7 @@ func TestRenderStatusShowsTypedAndCount(t *testing.T) {
 func TestRenderStatusSaysWhenNothingMatches(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
-	list := items("aa", "as")
-	term.render(list, nil, "z", Options{Alphabet: "asdfghjkl"})
+	term.renderStatus(0, "z")
 	term.Flush()
 	if rows := drawnRows(out.String()); rows[1] != "no match" {
 		t.Fatalf("second row = %q, want no match", rows[1])
@@ -283,20 +279,18 @@ func TestPickReportsNarrowingWithoutATerminal(t *testing.T) {
 	}
 }
 
-// Not parallel: Theme reads TERM_PROGRAM and the cache under HOME, so
-// these tests each get a fresh home and their own program name.
-func themeEnv(t *testing.T, program string) {
+// Not parallel: Theme caches under HOME, so each test gets a fresh one.
+func themeEnv(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("TERM_PROGRAM", program)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 }
 
 // A picker that cannot ask for the terminal's palette has to say so rather
 // than guess.
 func TestThemeReadsTheTerminalsColours(t *testing.T) {
-	themeEnv(t, "test-live-read")
+	themeEnv(t)
 	replies := "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" +
 		"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\" +
 		"\x1b]4;1;rgb:dcdc/3232/2f2f\x1b\\" +
@@ -304,7 +298,7 @@ func TestThemeReadsTheTerminalsColours(t *testing.T) {
 		"\x1b]4;4;rgb:2626/8b8b/d2d2\x1b\\"
 	term, out := keyTerminal(t, []byte(replies))
 
-	got := term.Theme()
+	got := term.Theme("test-live-read")
 	if got.Foreground != (color.RGBA{R: 0xCD, G: 0xD6, B: 0xF4, A: 0xFF}) {
 		t.Fatalf("Foreground = %+v", got.Foreground)
 	}
@@ -329,22 +323,22 @@ func TestThemeReadsTheTerminalsColours(t *testing.T) {
 }
 
 func TestThemeFallsBackWhenTheTerminalStaysQuiet(t *testing.T) {
-	themeEnv(t, "test-quiet")
+	themeEnv(t)
 	term, _ := keyTerminal(t, nil)
-	if got := term.Theme(); got != theme.Fallback() {
+	if got := term.Theme("test-quiet"); got != theme.Fallback() {
 		t.Fatalf("Theme() = %+v, want the fallback", got)
 	}
 	line, _ := lineTerminal("")
-	if got := line.Theme(); got != theme.Fallback() {
+	if got := line.Theme("test-quiet"); got != theme.Fallback() {
 		t.Fatalf("Theme() on a pipe = %+v, want the fallback", got)
 	}
 }
 
 // A terminal that answers only some queries keeps the rest at fallback.
 func TestThemeKeepsWhatDidArrive(t *testing.T) {
-	themeEnv(t, "test-partial")
+	themeEnv(t)
 	term, _ := keyTerminal(t, []byte("\x1b]11;rgb:1e/1e/2e\a"))
-	got := term.Theme()
+	got := term.Theme("test-partial")
 	if got.Background != (color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF}) {
 		t.Fatalf("Background = %+v", got.Background)
 	}
@@ -428,7 +422,7 @@ func TestSpinnerTextDropsALabelThatCannotFit(t *testing.T) {
 // A terminal that answered before is not asked again: the cached reply
 // comes back with nothing written to it.
 func TestThemeUsesTheCache(t *testing.T) {
-	themeEnv(t, "test-cached")
+	themeEnv(t)
 	want := theme.Colors{
 		Foreground: color.RGBA{R: 0xCD, G: 0xD6, B: 0xF4, A: 0xFF},
 		Background: color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF},
@@ -440,7 +434,7 @@ func TestThemeUsesTheCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	term, out := keyTerminal(t, nil)
-	if got := term.Theme(); got != want {
+	if got := term.Theme("test-cached"); got != want {
 		t.Fatalf("Theme() = %+v, want the cached colours", got)
 	}
 	term.Flush()
@@ -451,14 +445,14 @@ func TestThemeUsesTheCache(t *testing.T) {
 
 // A full live reply is remembered for the next run; a partial one is not.
 func TestThemeSavesAFullReply(t *testing.T) {
-	themeEnv(t, "test-live")
+	themeEnv(t)
 	replies := "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" +
 		"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\" +
 		"\x1b]4;1;rgb:dcdc/3232/2f2f\x1b\\" +
 		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\" +
 		"\x1b]4;4;rgb:2626/8b8b/d2d2\x1b\\"
 	term, _ := keyTerminal(t, []byte(replies))
-	got := term.Theme()
+	got := term.Theme("test-live")
 	if _, ok := theme.Load("test-live"); !ok {
 		t.Fatal("Theme() did not save the full reply")
 	}
@@ -467,10 +461,10 @@ func TestThemeSavesAFullReply(t *testing.T) {
 	}
 }
 
-func typedOut(t *testing.T, list []Item, opts Options) string {
+func typedOut(t *testing.T) string {
 	t.Helper()
 	term, out := keyTerminal(t, nil)
-	term.render(list, indices(list)[:2], "a", opts)
+	term.renderStatus(2, "a")
 	term.Flush()
 	return out.String()
 }
@@ -506,8 +500,7 @@ func TestStatusPutsTheCountOnTheMiddleRow(t *testing.T) {
 	for _, rows := range []int{3, 5, 7} {
 		term, out := keyTerminal(t, nil)
 		term.rows = rows
-		list := items("aa", "as", "ad")
-		term.render(list, indices(list), "", Options{Alphabet: "asdfghjkl"})
+		term.renderStatus(3, "")
 		term.Flush()
 		if got, want := countRow(out.String()), rows/2; got != want {
 			t.Fatalf("in %d rows the count is on row %d, want the middle row %d", rows, got, want)

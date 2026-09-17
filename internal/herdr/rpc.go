@@ -101,13 +101,11 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	}
 }
 
-// sendMu serializes connect-and-write; reads wait outside the lock.
-var sendMu sync.Mutex
-
-// send dials and writes as one step.
+// send dials and writes as one step, serialized per client; reads wait
+// outside the lock.
 func (c *Client) send(ctx context.Context, body []byte) (net.Conn, error) {
-	sendMu.Lock()
-	defer sendMu.Unlock()
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
 
 	conn, err := c.dial(ctx)
 	if err != nil {

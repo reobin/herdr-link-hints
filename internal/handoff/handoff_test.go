@@ -1,4 +1,4 @@
-package main
+package handoff
 
 import (
 	"encoding/json"
@@ -14,10 +14,9 @@ import (
 
 func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
-// Not parallel: the handoff path is an environment variable.
 func TestHandoffRoundTrip(t *testing.T) {
-	t.Setenv("HERDR_PLUGIN_STATE_DIR", t.TempDir())
-	want := prepared{
+	dir := t.TempDir()
+	want := Payload{
 		Focused:   "w1:p1",
 		Panes:     []herdr.Pane{{ID: "w1:p1", Width: 204, Height: 57}},
 		Scrolls:   map[string]herdr.Scroll{"w1:p1": {Offset: 3, ViewportRows: 57}},
@@ -27,19 +26,19 @@ func TestHandoffRoundTrip(t *testing.T) {
 		Drawn:     []string{"w1:p1"},
 	}
 
-	path, err := writeHandoff(want)
+	path, err := Write(dir, want)
 	if err != nil {
-		t.Fatalf("writeHandoff: %v", err)
+		t.Fatalf("Write: %v", err)
 	}
-	got, ok := readHandoff(path, discardLogger())
+	got, ok := Read(path, discardLogger())
 	if !ok {
-		t.Fatal("readHandoff rejected a payload just written")
+		t.Fatal("Read rejected a payload just written")
 	}
 	if got.Focused != want.Focused || len(got.Found) != 1 || got.Found[0].URL != want.Found[0].URL {
-		t.Fatalf("readHandoff() = %+v, want the payload back", got)
+		t.Fatalf("Read() = %+v, want the payload back", got)
 	}
 	if got.Infos["w1:p1"].CellWidthPx != 19 || got.Scrolls["w1:p1"].Offset != 3 {
-		t.Fatalf("readHandoff() lost pane state: %+v", got)
+		t.Fatalf("Read() lost pane state: %+v", got)
 	}
 	// Consumed: no second pickup.
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -52,10 +51,10 @@ func TestHandoffRejectsWhatItCannotTrust(t *testing.T) {
 	dir := t.TempDir()
 	log := discardLogger()
 
-	if _, ok := readHandoff("", log); ok {
+	if _, ok := Read("", log); ok {
 		t.Fatal("no path should mean no handoff")
 	}
-	if _, ok := readHandoff(filepath.Join(dir, "absent.json"), log); ok {
+	if _, ok := Read(filepath.Join(dir, "absent.json"), log); ok {
 		t.Fatal("a missing file should mean no handoff")
 	}
 
@@ -63,19 +62,19 @@ func TestHandoffRejectsWhatItCannotTrust(t *testing.T) {
 	if err := os.WriteFile(torn, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := readHandoff(torn, log); ok {
+	if _, ok := Read(torn, log); ok {
 		t.Fatal("unparseable json should mean no handoff")
 	}
 
 	stale := filepath.Join(dir, "stale.json")
-	body, err := json.Marshal(prepared{Focused: "w1:p1", WroteAt: time.Now().Add(-2 * handoffTTL)})
+	body, err := json.Marshal(Payload{Focused: "w1:p1", WroteAt: time.Now().Add(-2 * ttl)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(stale, body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := readHandoff(stale, log); ok {
+	if _, ok := Read(stale, log); ok {
 		t.Fatal("a payload older than the ttl belongs to a run that died")
 	}
 }
@@ -83,18 +82,17 @@ func TestHandoffRejectsWhatItCannotTrust(t *testing.T) {
 // Abandoned payloads must not linger.
 func TestHandoffSweepsWhatNobodyCameFor(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HERDR_PLUGIN_STATE_DIR", dir)
 
 	abandoned := filepath.Join(dir, "handoff-999999.json")
 	if err := os.WriteFile(abandoned, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-2 * handoffTTL)
+	old := time.Now().Add(-2 * ttl)
 	if err := os.Chtimes(abandoned, old, old); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := writeHandoff(prepared{Focused: "w1:p1"}); err != nil {
+	if _, err := Write(dir, Payload{Focused: "w1:p1"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(abandoned); !os.IsNotExist(err) {

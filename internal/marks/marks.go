@@ -1,4 +1,5 @@
-package main
+// Package marks owns the graphics layers this plugin puts over a pane.
+package marks
 
 import (
 	"context"
@@ -13,6 +14,19 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
+// Painter is the Herdr slice drawing needs.
+type Painter interface {
+	SetGraphics(ctx context.Context, f herdr.Frame) error
+	ClearGraphics(ctx context.Context, pane, layer string) error
+}
+
+// Z order stacks the dim backdrop, then the frame, then the badges.
+const (
+	frameZ = 1000
+	dimZ   = frameZ - 1
+	badgeZ = frameZ + 1
+)
+
 // dimLayerID is the backdrop layer.
 const dimLayerID = overlay.LayerID + "-dim"
 
@@ -23,10 +37,10 @@ func badgeLayerID(i int) string {
 // maxLayersTotal is Herdr's total graphics layer cap.
 const maxLayersTotal = 64
 
-// marker owns per-pane graphics layers, kept past process exit.
+// Marker owns per-pane graphics layers, kept past process exit.
 // A pane holds one full frame or the dim backdrop plus one layer per match.
-type marker struct {
-	client    *herdr.Client
+type Marker struct {
+	client    Painter
 	log       *slog.Logger
 	colors    theme.Colors
 	views     map[string]paneView
@@ -34,6 +48,16 @@ type marker struct {
 	mu        sync.Mutex
 	panes     map[string]*paneMarks
 	closing   bool
+	trail     *Trail
+}
+
+// Option overrides a New default.
+type Option func(*Marker)
+
+// WithTrail records what goes up, so a run that is killed outright can be
+// cleaned up by the next one.
+func WithTrail(t *Trail) Option {
+	return func(m *Marker) { m.trail = t }
 }
 
 type paneView struct {
@@ -51,8 +75,8 @@ type paneMarks struct {
 	layers  map[int]overlay.Badge
 }
 
-// newMarker keeps only drawable panes.
-func newMarker(client *herdr.Client, log *slog.Logger, colors theme.Colors, panes []herdr.Pane, scrolls map[string]herdr.Scroll, infos map[string]herdr.Graphics) *marker {
+// New keeps only drawable panes.
+func New(client Painter, log *slog.Logger, colors theme.Colors, panes []herdr.Pane, scrolls map[string]herdr.Scroll, infos map[string]herdr.Graphics, opts ...Option) *Marker {
 	views := make(map[string]paneView, len(panes))
 	maxLayers := make(map[string]int, len(panes))
 	for _, pane := range panes {
@@ -65,7 +89,7 @@ func newMarker(client *herdr.Client, log *slog.Logger, colors theme.Colors, pane
 			log.Debug("pane cannot be drawn on", "pane", pane.ID, "visible", info.PaneVisible)
 			continue
 		}
-		size := content(pane, scrolls[pane.ID].ViewportRows)
+		size := Content(pane, scrolls[pane.ID].ViewportRows)
 		log.Debug("pane viewport", "pane", pane.ID, "rows", size.Rows, "cols", size.Cols,
 			"cell_width_px", info.CellWidthPx, "cell_height_px", info.CellHeightPx,
 			"max_layers", info.MaxLayers)
@@ -75,19 +99,23 @@ func newMarker(client *herdr.Client, log *slog.Logger, colors theme.Colors, pane
 		}
 		maxLayers[pane.ID] = info.MaxLayers
 	}
-	return &marker{client: client, log: log, colors: colors, views: views,
+	m := &Marker{client: client, log: log, colors: colors, views: views,
 		maxLayers: maxLayers, panes: map[string]*paneMarks{}}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
-// content strips the border off a pane's rect.
-func content(pane herdr.Pane, viewportRows int) overlay.Size {
+// Content strips the border off a pane's rect.
+func Content(pane herdr.Pane, viewportRows int) overlay.Size {
 	if viewportRows <= 0 || viewportRows > pane.Height {
 		return overlay.Size{Rows: pane.Height, Cols: pane.Width}
 	}
 	return overlay.Size{Rows: viewportRows, Cols: pane.Width - (pane.Height - viewportRows)}
 }
 
-func (m *marker) marksFor(pane string) *paneMarks {
+func (m *Marker) marksFor(pane string) *paneMarks {
 	marks, ok := m.panes[pane]
 	if !ok {
 		marks = &paneMarks{layers: map[int]overlay.Badge{}}
@@ -96,8 +124,8 @@ func (m *marker) marksFor(pane string) *paneMarks {
 	return marks
 }
 
-// adopt takes over layers another process drew.
-func (m *marker) adopt(panes []string, badges map[string][]overlay.Badge) {
+// Adopt takes over layers another process drew.
+func (m *Marker) Adopt(panes []string, badges map[string][]overlay.Badge) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, pane := range panes {
@@ -110,8 +138,8 @@ func (m *marker) adopt(panes []string, badges map[string][]overlay.Badge) {
 	}
 }
 
-// drawnPanes names panes with a layer up.
-func (m *marker) drawnPanes() []string {
+// DrawnPanes names panes with a layer up.
+func (m *Marker) DrawnPanes() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	panes := make([]string, 0, len(m.panes))
@@ -124,10 +152,10 @@ func (m *marker) drawnPanes() []string {
 	return panes
 }
 
-func (m *marker) live() bool { return m != nil && len(m.views) > 0 }
+func (m *Marker) Live() bool { return m != nil && len(m.views) > 0 }
 
-// prime puts the dim backdrop under the frame, off the open path.
-func (m *marker) prime(ctx context.Context, badges map[string][]overlay.Badge) {
+// Prime puts the dim backdrop under the frame, off the open path.
+func (m *Marker) Prime(ctx context.Context, badges map[string][]overlay.Badge) {
 	var wg sync.WaitGroup
 	for pane, view := range m.views {
 		if len(badges[pane]) == 0 {
@@ -142,7 +170,7 @@ func (m *marker) prime(ctx context.Context, badges map[string][]overlay.Badge) {
 	wg.Wait()
 }
 
-func (m *marker) primePane(ctx context.Context, pane string, view paneView, badges []overlay.Badge) {
+func (m *Marker) primePane(ctx context.Context, pane string, view paneView, badges []overlay.Badge) {
 	plan, err := overlay.NewPlan(overlay.Scene{
 		Badges:   badges,
 		Colors:   m.colors,
@@ -180,7 +208,7 @@ func (m *marker) primePane(ctx context.Context, pane string, view paneView, badg
 	marks.dimUp = true
 }
 
-func (m *marker) done() bool {
+func (m *Marker) done() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.closing
@@ -221,7 +249,7 @@ func layerBudget(claims []claim, used, total int) map[string]bool {
 }
 
 // claims scores each pane for layered narrowing.
-func (m *marker) claims(badges map[string][]overlay.Badge) (claims []claim, used int) {
+func (m *Marker) claims(badges map[string][]overlay.Badge) (claims []claim, used int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for pane := range m.views {
@@ -264,8 +292,8 @@ func matching(plan overlay.Plan, badges []overlay.Badge) int {
 	return n
 }
 
-// draw brings every pane up to date, skipping unchanged ones.
-func (m *marker) draw(ctx context.Context, badges map[string][]overlay.Badge) {
+// Draw brings every pane up to date, skipping unchanged ones.
+func (m *Marker) Draw(ctx context.Context, badges map[string][]overlay.Badge) {
 	claims, used := m.claims(badges)
 	layered := layerBudget(claims, used, maxLayersTotal)
 	var wg sync.WaitGroup
@@ -284,7 +312,7 @@ func (m *marker) draw(ctx context.Context, badges map[string][]overlay.Badge) {
 }
 
 // drawBadges narrows by layer, setting before clearing to avoid flicker.
-func (m *marker) drawBadges(ctx context.Context, pane string, view paneView, badges []overlay.Badge) {
+func (m *Marker) drawBadges(ctx context.Context, pane string, view paneView, badges []overlay.Badge) {
 	m.mu.Lock()
 	marks := m.marksFor(pane)
 	plan, up, frameUp := marks.plan, maps.Clone(marks.layers), marks.frameUp
@@ -339,21 +367,21 @@ func (m *marker) drawBadges(ctx context.Context, pane string, view paneView, bad
 }
 
 // unchanged reports badges already on screen.
-func (m *marker) unchanged(pane string, badges []overlay.Badge) bool {
+func (m *Marker) unchanged(pane string, badges []overlay.Badge) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	marks := m.panes[pane]
 	return marks != nil && marks.frameUp && slices.Equal(marks.shown, badges)
 }
 
-func (m *marker) commitBadges(pane string, up map[int]overlay.Badge) {
+func (m *Marker) commitBadges(pane string, up map[int]overlay.Badge) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.marksFor(pane).layers = up
 }
 
 // drawFrame re-encodes the whole viewport.
-func (m *marker) drawFrame(ctx context.Context, pane string, view paneView, badges []overlay.Badge) {
+func (m *Marker) drawFrame(ctx context.Context, pane string, view paneView, badges []overlay.Badge) {
 	unchanged := m.unchanged(pane, badges)
 	m.mu.Lock()
 	marks := m.marksFor(pane)
@@ -372,7 +400,7 @@ func (m *marker) drawFrame(ctx context.Context, pane string, view paneView, badg
 			Viewport: view.size,
 		})
 		if err == nil {
-			err = m.setLayer(ctx, pane, overlay.LayerID, overlayZ, frame)
+			err = m.setLayer(ctx, pane, overlay.LayerID, frameZ, frame)
 		}
 		if err != nil {
 			m.log.Debug("frame failed", "pane", pane, "error", err)
@@ -395,7 +423,9 @@ func (m *marker) drawFrame(ctx context.Context, pane string, view paneView, badg
 	m.commitBadges(pane, up)
 }
 
-func (m *marker) setLayer(ctx context.Context, pane, layer string, z int, frame overlay.Frame) error {
+func (m *Marker) setLayer(ctx context.Context, pane, layer string, z int, frame overlay.Frame) error {
+	// Noted first: a kill between the two over-reports, which is harmless.
+	m.trail.mark(pane, layer)
 	return m.client.SetGraphics(ctx, herdr.Frame{
 		Pane:   pane,
 		Layer:  layer,
@@ -410,11 +440,11 @@ func (m *marker) setLayer(ctx context.Context, pane, layer string, z int, frame 
 	})
 }
 
-func (m *marker) clearLayer(ctx context.Context, pane, layer string) error {
+func (m *Marker) clearLayer(ctx context.Context, pane, layer string) error {
 	return m.client.ClearGraphics(ctx, pane, layer)
 }
 
-func (m *marker) clearFrame(ctx context.Context, pane string) {
+func (m *Marker) clearFrame(ctx context.Context, pane string) {
 	if err := m.clearLayer(ctx, pane, overlay.LayerID); err != nil {
 		m.log.Debug("clear frame failed", "pane", pane, "error", err)
 		return
@@ -426,17 +456,34 @@ func (m *marker) clearFrame(ctx context.Context, pane string) {
 	marks.shown = nil
 }
 
-func (m *marker) clear(ctx context.Context) {
+// Clear takes every layer down, panes in parallel so quitting stays quick.
+func (m *Marker) Clear(ctx context.Context) {
 	m.mu.Lock()
 	m.closing = true
 	m.mu.Unlock()
+	var wg sync.WaitGroup
 	for pane := range m.views {
-		m.clearPane(ctx, pane)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.clearPane(ctx, pane)
+		}()
+	}
+	wg.Wait()
+	if m.stranded() == 0 {
+		m.trail.done()
 	}
 }
 
+// stranded counts panes whose layers would not come down.
+func (m *Marker) stranded() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.panes)
+}
+
 // clearPane removes every layer this plugin owns.
-func (m *marker) clearPane(ctx context.Context, pane string) {
+func (m *Marker) clearPane(ctx context.Context, pane string) {
 	m.mu.Lock()
 	marks := m.panes[pane]
 	if marks == nil {

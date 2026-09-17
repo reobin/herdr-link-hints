@@ -36,7 +36,7 @@ func Pick(t *Terminal, items []Item, opts Options) (int, bool) {
 			narrow(opts, matches, typed)
 			first, shown = false, typed
 		}
-		t.render(items, matches, typed, opts)
+		t.renderStatus(len(matches), typed)
 		switch k := t.readKey(); k.kind {
 		case keyEnd, keyEscape:
 			return 0, false
@@ -93,10 +93,6 @@ func indices(items []Item) []int {
 		out[i] = i
 	}
 	return out
-}
-
-func (t *Terminal) render(items []Item, matches []int, typed string, opts Options) {
-	t.renderStatus(len(matches), typed)
 }
 
 func (t *Terminal) renderStatus(matches int, typed string) {

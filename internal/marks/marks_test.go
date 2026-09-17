@@ -1,4 +1,4 @@
-package main
+package marks
 
 import (
 	"context"
@@ -66,10 +66,10 @@ func indexOf(calls []graphicsCall, want string) int {
 	return -1
 }
 
-// startGraphicsServer exercises the marker through the real client.
+// startGraphicsServer exercises the Marker through the real client.
 func startGraphicsServer(t *testing.T) (*graphicsServer, string) {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "hl-marker")
+	dir, err := os.MkdirTemp("", "hl-Marker")
 	if err != nil {
 		t.Fatalf("temp dir: %v", err)
 	}
@@ -123,7 +123,7 @@ func startGraphicsServer(t *testing.T) (*graphicsServer, string) {
 	return server, socket
 }
 
-func testMarker(t *testing.T, socket string, panes ...string) *marker {
+func testMarker(t *testing.T, socket string, panes ...string) *Marker {
 	t.Helper()
 	views := make(map[string]paneView, len(panes))
 	maxLayers := make(map[string]int, len(panes))
@@ -134,7 +134,7 @@ func testMarker(t *testing.T, socket string, panes ...string) *marker {
 		}
 		maxLayers[pane] = 16
 	}
-	return &marker{
+	return &Marker{
 		client:    herdr.New(herdr.WithSocket(socket)),
 		log:       slog.New(slog.DiscardHandler),
 		colors:    theme.Fallback(),
@@ -176,10 +176,10 @@ func TestDrawBadgesSetsBeforeClearing(t *testing.T) {
 
 	badges := testBadges(4)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.adopt([]string{"w1:p1"}, all)
-	m.prime(ctx, all)
+	m.Adopt([]string{"w1:p1"}, all)
+	m.Prime(ctx, all)
 
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 1)})
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 1)})
 
 	calls := server.seen()
 	cleared := indexOf(calls, "pane.graphics.clear w1:p1 "+overlay.LayerID)
@@ -211,17 +211,17 @@ func TestDrawBadgesRedrawsOnlyWhatChanged(t *testing.T) {
 
 	badges := testBadges(4)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.adopt([]string{"w1:p1"}, all)
-	m.prime(ctx, all)
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0, 1, 2)})
+	m.Adopt([]string{"w1:p1"}, all)
+	m.Prime(ctx, all)
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0, 1, 2)})
 
 	before := len(server.seen())
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0, 1, 2)})
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0, 1, 2)})
 	if after := len(server.seen()); after != before {
 		t.Fatalf("an unchanged narrowing made %d more calls", after-before)
 	}
 
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
 	var sets, clears int
 	for _, c := range server.seen()[before:] {
 		switch c.method {
@@ -246,8 +246,8 @@ func TestDrawFallsBackToAFrameWhenALayerIsRefused(t *testing.T) {
 
 	badges := testBadges(4)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.adopt([]string{"w1:p1"}, all)
-	m.prime(ctx, all)
+	m.Adopt([]string{"w1:p1"}, all)
+	m.Prime(ctx, all)
 
 	server.mu.Lock()
 	for i := range 4 {
@@ -255,7 +255,7 @@ func TestDrawFallsBackToAFrameWhenALayerIsRefused(t *testing.T) {
 	}
 	server.mu.Unlock()
 
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 1, 2)})
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 1, 2)})
 
 	if !slices.Contains(server.layerSets(), overlay.LayerID) {
 		t.Fatalf("a refused badge layer should fall the pane back to a frame: %v", server.seen())
@@ -281,10 +281,10 @@ func TestClearTakesDownEveryLayer(t *testing.T) {
 
 	badges := testBadges(3)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.adopt([]string{"w1:p1"}, all)
-	m.prime(ctx, all)
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
-	m.clear(ctx)
+	m.Adopt([]string{"w1:p1"}, all)
+	m.Prime(ctx, all)
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
+	m.Clear(ctx)
 
 	set := map[string]bool{}
 	for _, c := range server.seen() {
@@ -382,8 +382,8 @@ func TestDrawUsesAFrameUntilTheBackdropIsUp(t *testing.T) {
 	ctx := context.Background()
 
 	badges := testBadges(3)
-	m.adopt([]string{"w1:p1"}, map[string][]overlay.Badge{"w1:p1": badges})
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
+	m.Adopt([]string{"w1:p1"}, map[string][]overlay.Badge{"w1:p1": badges})
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
 
 	for _, layer := range server.layerSets() {
 		if layer != overlay.LayerID {
@@ -401,13 +401,13 @@ func TestDrawRejectsAPlanFromADifferentScan(t *testing.T) {
 
 	badges := testBadges(3)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.adopt([]string{"w1:p1"}, all)
-	m.prime(ctx, all)
+	m.Adopt([]string{"w1:p1"}, all)
+	m.Prime(ctx, all)
 
 	moved := slices.Clone(badges)
 	moved[1].Col += 3
 	before := len(server.seen())
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(moved, 0)})
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(moved, 0)})
 
 	for _, c := range server.seen()[before:] {
 		if c.method == "pane.graphics.set" && c.layer != overlay.LayerID {
@@ -437,19 +437,19 @@ func TestPrimeStrandsNothingAfterClear(t *testing.T) {
 
 	badges := testBadges(3)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.adopt([]string{"w1:p1"}, all)
+	m.Adopt([]string{"w1:p1"}, all)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		m.prime(ctx, all)
+		m.Prime(ctx, all)
 	}()
-	m.clear(ctx)
+	m.Clear(ctx)
 	wg.Wait()
-	// clear() can win the race outright, in which case prime never set
+	// Clear() can win the race outright, in which case prime never set
 	// anything. Either way nothing may be left up.
-	m.clear(ctx)
+	m.Clear(ctx)
 
 	up := map[string]bool{}
 	for _, c := range server.seen() {
@@ -474,13 +474,13 @@ func TestDrawFallsBackWhenARuledOutBadgeShowsTypedProgress(t *testing.T) {
 
 	badges := testBadges(4)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.adopt([]string{"w1:p1"}, all)
-	m.prime(ctx, all)
+	m.Adopt([]string{"w1:p1"}, all)
+	m.Prime(ctx, all)
 
 	shared := narrow(badges, 0)
 	shared[1].Typed = 1
 	before := len(server.seen())
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": shared})
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": shared})
 
 	for _, c := range server.seen()[before:] {
 		if c.method == "pane.graphics.set" && c.layer != overlay.LayerID {
@@ -516,8 +516,8 @@ func TestALinkLessPaneCostsNothing(t *testing.T) {
 
 	badges := testBadges(3)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.prime(ctx, all)
-	m.draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
+	m.Prime(ctx, all)
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
 
 	for _, c := range server.seen() {
 		if c.pane == "w1:p2" {
@@ -537,10 +537,66 @@ func TestALinkLessPaneStillClearsAnAdoptedFrame(t *testing.T) {
 	m := testMarker(t, socket, "w1:p1")
 	ctx := context.Background()
 
-	m.adopt([]string{"w1:p1"}, map[string][]overlay.Badge{"w1:p1": testBadges(3)})
-	m.draw(ctx, map[string][]overlay.Badge{})
+	m.Adopt([]string{"w1:p1"}, map[string][]overlay.Badge{"w1:p1": testBadges(3)})
+	m.Draw(ctx, map[string][]overlay.Badge{})
 
 	if sets := server.layerSets(); !slices.Contains(sets, overlay.LayerID) {
 		t.Fatalf("left an adopted frame up: %v", server.seen())
+	}
+}
+
+func TestContentStripsThePaneBorder(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		pane         herdr.Pane
+		viewportRows int
+		want         overlay.Size
+	}{
+		// The live numbers this was calibrated against.
+		{"bordered", herdr.Pane{Width: 206, Height: 59}, 57, overlay.Size{Cols: 204, Rows: 57}},
+		{"borderless", herdr.Pane{Width: 80, Height: 24}, 24, overlay.Size{Cols: 80, Rows: 24}},
+		{"unknown viewport", herdr.Pane{Width: 80, Height: 24}, 0, overlay.Size{Cols: 80, Rows: 24}},
+		{"viewport larger than the rect", herdr.Pane{Width: 80, Height: 24}, 99, overlay.Size{Cols: 80, Rows: 24}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Content(tc.pane, tc.viewportRows); got != tc.want {
+				t.Fatalf("Content(%+v, %d) = %+v, want %+v", tc.pane, tc.viewportRows, got, tc.want)
+			}
+		})
+	}
+}
+
+// The popup is a fixed box holding the readout plus border.
+
+// Unchanged panes must not re-encode.
+func TestMarkerSkipsOnlyUnchangedPanes(t *testing.T) {
+	t.Parallel()
+	badges := []overlay.Badge{{Row: 1, Col: 2, Width: 4, Code: "as"}}
+	m := &Marker{
+		panes: map[string]*paneMarks{
+			"w1:p1": {frameUp: true, shown: badges},
+		},
+	}
+
+	if !m.unchanged("w1:p1", []overlay.Badge{{Row: 1, Col: 2, Width: 4, Code: "as"}}) {
+		t.Fatal("an identical badge set should not be redrawn")
+	}
+	dimmed := []overlay.Badge{{Row: 1, Col: 2, Width: 4, Code: "as", Dim: true}}
+	if m.unchanged("w1:p1", dimmed) {
+		t.Fatal("dimming a badge changes the image, so it has to be redrawn")
+	}
+	if m.unchanged("w1:p1", nil) {
+		t.Fatal("losing every badge changes the image, so it has to be redrawn")
+	}
+	if m.unchanged("w1:p2", nil) {
+		t.Fatal("a pane never drawn on has nothing on screen to keep")
+	}
+
+	m.panes["w1:p1"].frameUp = false
+	if m.unchanged("w1:p1", badges) {
+		t.Fatal("a pane whose layer was cleared has to be drawn again")
 	}
 }

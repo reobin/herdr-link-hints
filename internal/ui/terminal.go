@@ -62,13 +62,12 @@ func (t *Terminal) interactive() bool { return t.keys != nil }
 // Size is what the pane got, not what was asked for.
 func (t *Terminal) Size() (rows, cols int) { return t.rows, t.cols }
 
-// Theme asks the terminal its colours, caching full replies by TERM_PROGRAM.
-func (t *Terminal) Theme() theme.Colors {
+// Theme asks the terminal its colours, caching full replies by program.
+func (t *Terminal) Theme(program string) theme.Colors {
 	colors := theme.Fallback()
 	if !t.interactive() {
 		return colors
 	}
-	program := os.Getenv("TERM_PROGRAM")
 	if cached, ok := theme.Load(program); ok {
 		return cached
 	}

@@ -35,30 +35,6 @@ func TestParseScreenPanesFallsBack(t *testing.T) {
 	}
 }
 
-func TestParsePaneLabels(t *testing.T) {
-	t.Parallel()
-	list := `{"result":{"panes":[{"pane_id":"w1:p1","label":"neon"},{"pane_id":"w1:p2","label":""},{"pane_id":"w1:p3","label":"other"}]}}`
-	got, err := parsePaneLabels([]byte(list), defaultLabels([]string{"w1:p1", "w1:p2"}))
-	if err != nil {
-		t.Fatalf("parsePaneLabels: %v", err)
-	}
-	want := map[string]string{"w1:p1": "neon", "w1:p2": "p2"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("parsePaneLabels() = %+v, want %+v", got, want)
-	}
-}
-
-func TestParsePaneLabelsKeepsDefaultsOnBadJSON(t *testing.T) {
-	t.Parallel()
-	got, err := parsePaneLabels([]byte("nope"), defaultLabels([]string{"w1:p1"}))
-	if err == nil {
-		t.Fatal("expected a parse error")
-	}
-	if want := map[string]string{"w1:p1": "p1"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("parsePaneLabels() = %+v, want %+v", got, want)
-	}
-}
-
 func TestParsePaneScroll(t *testing.T) {
 	t.Parallel()
 	got, err := parsePaneScroll([]byte(`{"result":{"pane":{"scroll":{"max_offset_from_bottom":17,"viewport_rows":57}}}}`))
@@ -73,16 +49,6 @@ func TestParsePaneScroll(t *testing.T) {
 	}
 	if _, err := parsePaneScroll([]byte("nope")); err == nil {
 		t.Fatal("expected a parse error")
-	}
-}
-
-func TestShortID(t *testing.T) {
-	t.Parallel()
-	if got := shortID("w1:p1"); got != "p1" {
-		t.Fatalf("shortID() = %q", got)
-	}
-	if got := shortID("bare"); got != "bare" {
-		t.Fatalf("shortID() = %q", got)
 	}
 }
 
@@ -147,27 +113,6 @@ func TestScreenPanesOverSocket(t *testing.T) {
 	}
 }
 
-func TestPaneLabelsOverSocket(t *testing.T) {
-	t.Parallel()
-	socket := fakeServer(t, func(request map[string]any) [][]byte {
-		return [][]byte{mustJSON(t, map[string]any{
-			"id": request["id"],
-			"result": map[string]any{"type": "pane_list", "panes": []any{
-				map[string]any{"pane_id": "w1:p1", "label": "neon"},
-				map[string]any{"pane_id": "w1:p2", "label": ""},
-			}},
-		})}
-	})
-
-	got, err := New(WithSocket(socket)).PaneLabels(context.Background(), []string{"w1:p1", "w1:p2"})
-	if err != nil {
-		t.Fatalf("PaneLabels: %v", err)
-	}
-	if want := map[string]string{"w1:p1": "neon", "w1:p2": "p2"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("PaneLabels() = %+v, want %+v", got, want)
-	}
-}
-
 func TestPaneScrollOverSocket(t *testing.T) {
 	t.Parallel()
 	requests := make(chan map[string]any, 1)
@@ -205,11 +150,6 @@ func TestSocketFallsBackToCLI(t *testing.T) {
 	}
 	if _, err := client.PaneLines(context.Background(), "w1:p9"); err == nil {
 		t.Fatal("expected an error when both paths fail")
-	}
-	if labels, err := client.PaneLabels(context.Background(), []string{"w1:p9"}); err == nil {
-		t.Fatal("expected an error when both paths fail")
-	} else if want := map[string]string{"w1:p9": "p9"}; !reflect.DeepEqual(labels, want) {
-		t.Fatalf("PaneLabels() = %+v, want %+v", labels, want)
 	}
 	if scroll, err := client.PaneScroll(context.Background(), "w1:p9"); err == nil {
 		t.Fatal("expected an error when both paths fail")

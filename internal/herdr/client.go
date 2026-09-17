@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type Client struct {
 	cmdTimeout time.Duration
 	rpcTimeout time.Duration
 	log        *slog.Logger
+	sendMu     sync.Mutex
 }
 
 func New(opts ...Option) *Client {
@@ -160,72 +162,9 @@ func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
 	return panesFromLayout(payload.Result.Layout, fallback), nil
 }
 
-// PaneLabels gives every pane an entry, defaulting to its short ID.
-func (c *Client) PaneLabels(ctx context.Context, panes []string) (map[string]string, error) {
-	labels := defaultLabels(panes)
-	listed, err := c.paneLabelsSocket(ctx, labels)
-	if err == nil {
-		return listed, nil
-	}
-	c.fellBack("pane.list", err)
-	out, err := c.run(ctx, "pane", "list")
-	if err != nil {
-		return labels, err
-	}
-	return parsePaneLabels(out, labels)
-}
-
-func (c *Client) paneLabelsSocket(ctx context.Context, labels map[string]string) (map[string]string, error) {
-	var result struct {
-		Panes []labelPane `json:"panes"`
-	}
-	if err := c.call(ctx, "pane.list", map[string]any{}, &result); err != nil {
-		return nil, err
-	}
-	fillLabels(labels, result.Panes)
-	return labels, nil
-}
-
-type labelPane struct {
+type listedPane struct {
 	PaneID string      `json:"pane_id"`
-	Label  string      `json:"label"`
 	Scroll scrollState `json:"scroll"`
-}
-
-func fillLabels(labels map[string]string, panes []labelPane) {
-	for _, info := range panes {
-		if _, wanted := labels[info.PaneID]; wanted && info.Label != "" {
-			labels[info.PaneID] = info.Label
-		}
-	}
-}
-
-func defaultLabels(panes []string) map[string]string {
-	labels := make(map[string]string, len(panes))
-	for _, pane := range panes {
-		labels[pane] = shortID(pane)
-	}
-	return labels
-}
-
-func parsePaneLabels(out []byte, labels map[string]string) (map[string]string, error) {
-	var payload struct {
-		Result struct {
-			Panes []labelPane `json:"panes"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(out, &payload); err != nil {
-		return labels, fmt.Errorf("parse pane list: %w", err)
-	}
-	fillLabels(labels, payload.Result.Panes)
-	return labels, nil
-}
-
-func shortID(pane string) string {
-	if i := strings.LastIndex(pane, ":"); i >= 0 {
-		return pane[i+1:]
-	}
-	return pane
 }
 
 // Scroll is a pane's scroll state. Offset is scrollback below the viewport.
@@ -237,7 +176,7 @@ type Scroll struct {
 // PaneScrolls reads every pane's scroll from one pane.list.
 func (c *Client) PaneScrolls(ctx context.Context) (map[string]Scroll, error) {
 	var result struct {
-		Panes []labelPane `json:"panes"`
+		Panes []listedPane `json:"panes"`
 	}
 	if err := c.call(ctx, "pane.list", map[string]any{}, &result); err != nil {
 		return nil, err
