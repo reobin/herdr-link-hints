@@ -164,10 +164,57 @@ func TestLocate(t *testing.T) {
 		wantOK  bool
 	}{
 		{
-			name:    "shift is enough for a text link",
+			name:    "confirms a text link at the shifted row",
+			visible: []string{"", "", "", "", "", "", "", "the https://a.io/x here"},
 			choice:  links.Link{URL: "https://a.io/x", Text: "https://a.io/x", Kind: links.Text, Row: 10, Col: 4},
 			shift:   3,
 			wantRow: 7, wantCol: 4, wantOK: true,
+		},
+		{
+			name:    "refuses the shifted row when another link took it",
+			visible: []string{"", "", "", "", "", "", "", "the https://b.io/y here"},
+			choice:  links.Link{URL: "https://a.io/x", Text: "https://a.io/x", Kind: links.Text, Row: 10, Col: 4},
+			shift:   3,
+		},
+		{
+			name:    "confirms a soft-wrapped url by the run that reaches the edge",
+			visible: []string{"go https://a.io/long-ur", "l-continued here"},
+			choice:  links.Link{URL: "https://a.io/long-url-continued", Text: "https://a.io/long-url-continued", Kind: links.Text, Row: 3, Col: 3},
+			shift:   3,
+			wantRow: 0, wantCol: 3, wantOK: true,
+		},
+		{
+			name:    "confirms a soft-wrapped url that has not scrolled",
+			visible: []string{"go https://a.io/long-ur", "l-continued here"},
+			choice:  links.Link{URL: "https://a.io/long-url-continued", Text: "https://a.io/long-url-continued", Kind: links.Text, Row: 0, Col: 3},
+			wantRow: 0, wantCol: 3, wantOK: true,
+		},
+		{
+			name:    "confirms a soft-wrapped url past wide characters",
+			visible: []string{"日https://a.io/long-ur", "l-continued here"},
+			choice:  links.Link{URL: "https://a.io/long-url-continued", Text: "https://a.io/long-url-continued", Kind: links.Text, Row: 0, Col: 2},
+			wantRow: 0, wantCol: 2, wantOK: true,
+		},
+		{
+			name:    "confirms a soft-wrapped url past a zero-width rune",
+			visible: []string{"a\u200dhttps://a.io/long-ur", "l-continued here"},
+			choice:  links.Link{URL: "https://a.io/long-url-continued", Text: "https://a.io/long-url-continued", Kind: links.Text, Row: 0, Col: 1},
+			wantRow: 0, wantCol: 1, wantOK: true,
+		},
+		{
+			name:    "refuses a run with no continuation under it",
+			visible: []string{"go https://a.io/long-ur"},
+			choice:  links.Link{URL: "https://a.io/long-url-continued", Text: "https://a.io/long-url-continued", Kind: links.Text, Row: 0, Col: 3},
+		},
+		{
+			name:    "refuses a longer url that merely contains the pick",
+			visible: []string{"see https://a.io/xyz here"},
+			choice:  links.Link{URL: "https://a.io/x", Text: "https://a.io/x", Kind: links.Text, Row: 0, Col: 4},
+		},
+		{
+			name:    "refuses an anchor that is only a prefix of the one on screen",
+			visible: []string{"see #2"},
+			choice:  links.Link{URL: "https://g.io/pull/22", Text: "#22", Kind: links.OSC8, Row: 0, Col: 4},
 		},
 		{
 			name:    "re-finds a text link that scrolled past the shift",
