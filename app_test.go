@@ -147,6 +147,7 @@ type fakeClient struct {
 	lines       map[string][]string
 	rescan      map[string][]string
 	reads       int
+	area        herdr.Rect
 	panes       []herdr.Pane
 	panesErr    error
 	scrolls     map[string]herdr.Scroll
@@ -175,11 +176,11 @@ func (f *fakeClient) ObserveOSC8(context.Context, string, int, int) ([]ansi.Link
 	return nil, nil
 }
 
-func (f *fakeClient) ScreenPanes(context.Context, string) ([]herdr.Pane, error) {
+func (f *fakeClient) ScreenPanes(context.Context, string) (herdr.Layout, error) {
 	if f.panesErr != nil {
-		return nil, f.panesErr
+		return herdr.Layout{}, f.panesErr
 	}
-	return f.panes, nil
+	return herdr.Layout{Area: f.area, Panes: f.panes}, nil
 }
 
 func (f *fakeClient) PaneScrolls(context.Context) (map[string]herdr.Scroll, error) {
@@ -237,6 +238,7 @@ func (f *fakeClient) seen() (set, cleared []string) {
 func newFakeClient(lines ...string) *fakeClient {
 	return &fakeClient{
 		lines:   map[string][]string{"w1:p1": lines},
+		area:    herdr.Rect{Width: 80, Height: 24},
 		panes:   []herdr.Pane{{ID: "w1:p1", Width: 80, Height: 24}},
 		scrolls: map[string]herdr.Scroll{"w1:p1": {ViewportRows: 24}},
 		infos: map[string]herdr.Graphics{
@@ -627,5 +629,16 @@ func TestPickFailsWhenTheBrowserRefusesTheURL(t *testing.T) {
 	term.Close()
 	if got := out.String(); !strings.Contains(got, "failed") {
 		t.Fatalf("pick() said %q, want it to report the failure", got)
+	}
+}
+
+// The popup footprint rides in the handoff, so both processes keep their
+// badges off the same cells.
+func TestGatherCarriesThePopupFootprint(t *testing.T) {
+	t.Parallel()
+	f := newFakeClient("see https://a.io/x for more")
+	a := testApp(t, f, config.Config{})
+	if got, want := a.gather(context.Background(), "w1:p1").Popup, (herdr.Rect{X: 33, Y: 9, Width: 14, Height: 5}); got != want {
+		t.Fatalf("gather().Popup = %+v, want %+v", got, want)
 	}
 }

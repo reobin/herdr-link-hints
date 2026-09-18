@@ -93,71 +93,86 @@ func (c *Client) paneLinesSocket(ctx context.Context, pane string) ([]string, er
 	return strings.Split(result.Read.Text, "\n"), nil
 }
 
-// Pane is a pane on screen. Width and Height include the border.
+// Rect is a cell rectangle on the surface panes tile.
+type Rect struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// Pane is a pane on screen. The rect includes the border.
 type Pane struct {
 	ID     string
+	X      int
+	Y      int
 	Width  int
 	Height int
 }
 
+// Layout is the panes sharing a screen and the surface they tile, which is
+// also what a popup is centred on.
+type Layout struct {
+	Area  Rect
+	Panes []Pane
+}
+
 // ScreenPanes lists panes sharing a screen, else the pane alone.
-func (c *Client) ScreenPanes(ctx context.Context, pane string) ([]Pane, error) {
-	panes, err := c.screenPanesSocket(ctx, pane)
+func (c *Client) ScreenPanes(ctx context.Context, pane string) (Layout, error) {
+	layout, err := c.screenPanesSocket(ctx, pane)
 	if err == nil {
-		return panes, nil
+		return layout, nil
 	}
 	c.fellBack("pane.layout", err)
 	out, err := c.run(ctx, "pane", "layout", "--pane", pane)
 	if err != nil {
-		return []Pane{{ID: pane}}, err
+		return Layout{Panes: []Pane{{ID: pane}}}, err
 	}
 	return parseScreenPanes(out, pane)
 }
 
-func (c *Client) screenPanesSocket(ctx context.Context, pane string) ([]Pane, error) {
+func (c *Client) screenPanesSocket(ctx context.Context, pane string) (Layout, error) {
 	var result struct {
 		Layout layoutResult `json:"layout"`
 	}
 	if err := c.call(ctx, "pane.layout", map[string]any{"pane_id": pane}, &result); err != nil {
-		return nil, err
+		return Layout{}, err
 	}
 	return panesFromLayout(result.Layout, pane), nil
 }
 
 // layoutResult is the layout object CLI and socket share.
 type layoutResult struct {
+	Area  Rect         `json:"area"`
 	Panes []layoutPane `json:"panes"`
 }
 
 type layoutPane struct {
 	PaneID string `json:"pane_id"`
-	Rect   struct {
-		Width  int `json:"width"`
-		Height int `json:"height"`
-	} `json:"rect"`
+	Rect   Rect   `json:"rect"`
 }
 
-func panesFromLayout(layout layoutResult, fallback string) []Pane {
+func panesFromLayout(layout layoutResult, fallback string) Layout {
 	var panes []Pane
 	for _, p := range layout.Panes {
 		if p.PaneID != "" {
-			panes = append(panes, Pane{ID: p.PaneID, Width: p.Rect.Width, Height: p.Rect.Height})
+			panes = append(panes, Pane{ID: p.PaneID, X: p.Rect.X, Y: p.Rect.Y, Width: p.Rect.Width, Height: p.Rect.Height})
 		}
 	}
 	if len(panes) == 0 {
-		return []Pane{{ID: fallback}}
+		panes = []Pane{{ID: fallback}}
 	}
-	return panes
+	return Layout{Area: layout.Area, Panes: panes}
 }
 
-func parseScreenPanes(out []byte, fallback string) ([]Pane, error) {
+func parseScreenPanes(out []byte, fallback string) (Layout, error) {
 	var payload struct {
 		Result struct {
 			Layout layoutResult `json:"layout"`
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(out, &payload); err != nil {
-		return []Pane{{ID: fallback}}, fmt.Errorf("parse pane layout: %w", err)
+		return Layout{Panes: []Pane{{ID: fallback}}}, fmt.Errorf("parse pane layout: %w", err)
 	}
 	return panesFromLayout(payload.Result.Layout, fallback), nil
 }

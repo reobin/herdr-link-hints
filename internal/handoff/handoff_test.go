@@ -23,7 +23,8 @@ func TestHandoffRoundTrip(t *testing.T) {
 		Infos:     map[string]herdr.Graphics{"w1:p1": {PaneVisible: true, CellWidthPx: 19, CellHeightPx: 54}},
 		HasColors: true,
 		Found:     []links.Link{{URL: "https://a.io/x", Text: "x", Row: 2, Col: 4, Pane: "w1:p1"}},
-		Drawn:     []string{"w1:p1"},
+		Popup:     herdr.Rect{X: 96, Y: 27, Width: 14, Height: 5},
+		Drawn:     map[string][]string{"w1:p1": {"link-hints", "link-hints-top"}},
 	}
 
 	path, err := Write(dir, want)
@@ -39,6 +40,9 @@ func TestHandoffRoundTrip(t *testing.T) {
 	}
 	if got.Infos["w1:p1"].CellWidthPx != 19 || got.Scrolls["w1:p1"].Offset != 3 {
 		t.Fatalf("Read() lost pane state: %+v", got)
+	}
+	if got.Popup != want.Popup || len(got.Drawn["w1:p1"]) != 2 {
+		t.Fatalf("Read() lost the popup or the drawn layers: %+v", got)
 	}
 	// Consumed: no second pickup.
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

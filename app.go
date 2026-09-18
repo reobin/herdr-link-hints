@@ -23,7 +23,7 @@ import (
 type client interface {
 	scan.Source
 	marks.Painter
-	ScreenPanes(ctx context.Context, pane string) ([]herdr.Pane, error)
+	ScreenPanes(ctx context.Context, pane string) (herdr.Layout, error)
 	PaneScrolls(ctx context.Context) (map[string]herdr.Scroll, error)
 	PaneScroll(ctx context.Context, pane string) (herdr.Scroll, error)
 	GraphicsInfos(ctx context.Context, panes []string) map[string]herdr.Graphics
@@ -81,10 +81,10 @@ func (a *app) prepare(ctx context.Context, env map[string]string) (*marks.Marker
 
 	var marker *marks.Marker
 	if cached {
-		marker = marks.New(a.client, a.log, colors, p.Panes, p.Scrolls, p.Infos, marks.WithTrail(a.trail))
+		marker = a.marker(colors, p)
 		if marker.Live() {
 			marker.Draw(ctx, firstBadges(p.Found, hints.Codes(len(p.Found), hints.DefaultAlphabet)))
-			p.Drawn = marker.DrawnPanes()
+			p.Drawn = marker.Drawn()
 		}
 	} else {
 		a.log.Debug("theme cache miss, leaving the drawing to the picker pane")
@@ -141,7 +141,7 @@ func (a *app) pick(ctx context.Context, term *ui.Terminal, colors themer) int {
 	found := p.Found
 
 	codes := hints.Codes(len(found), hints.DefaultAlphabet)
-	marker := marks.New(a.client, a.log, p.Colors, p.Panes, p.Scrolls, p.Infos, marks.WithTrail(a.trail))
+	marker := a.marker(p.Colors, p)
 	defer marker.Clear(context.WithoutCancel(ctx))
 	// Keep the action frame; don't re-encode it.
 	marker.Adopt(p.Drawn, firstBadges(found, codes))
@@ -184,6 +184,22 @@ func (a *app) pick(ctx context.Context, term *ui.Terminal, colors themer) int {
 	return exitOK
 }
 
+// marker draws on the scanned panes, keeping clear of where the popup goes.
+func (a *app) marker(colors theme.Colors, p handoff.Payload) *marks.Marker {
+	return marks.New(a.client, a.log, colors, p.Panes, p.Scrolls, p.Infos,
+		marks.WithTrail(a.trail), marks.WithPopup(p.Popup))
+}
+
+// popupRect is where the picker popup will sit, zero when the surface
+// cannot hold one.
+func popupRect(area herdr.Rect) herdr.Rect {
+	rect, ok := herdr.PopupRect(area, config.PopupWidth, config.PopupHeight)
+	if !ok {
+		return herdr.Rect{}
+	}
+	return rect
+}
+
 // focusedPane takes the first source that named a pane.
 func (a *app) focusedPane() string {
 	for _, source := range a.cfg.PaneSources() {
@@ -199,7 +215,7 @@ func (a *app) gather(ctx context.Context, focused string) handoff.Payload {
 	// pane.list carries scroll, pane.layout none, so they run together.
 	// Both precede the snapshot they baseline.
 	var (
-		panes   []herdr.Pane
+		layout  herdr.Layout
 		listed  map[string]herdr.Scroll
 		layoutW sync.WaitGroup
 	)
@@ -207,7 +223,7 @@ func (a *app) gather(ctx context.Context, focused string) handoff.Payload {
 	go func() {
 		defer layoutW.Done()
 		var err error
-		if panes, err = a.client.ScreenPanes(ctx, focused); err != nil {
+		if layout, err = a.client.ScreenPanes(ctx, focused); err != nil {
 			a.log.Debug("pane layout failed", "pane", focused, "error", err)
 		}
 	}()
@@ -220,6 +236,7 @@ func (a *app) gather(ctx context.Context, focused string) handoff.Payload {
 	}()
 	layoutW.Wait()
 
+	panes := layout.Panes
 	ids := paneIDs(panes)
 	scrolls := a.scrollsFor(ctx, ids, listed)
 
@@ -253,6 +270,7 @@ func (a *app) gather(ctx context.Context, focused string) handoff.Payload {
 		Scrolls: scrolls,
 		Infos:   infos,
 		Found:   hints.Rank(scanned, focused, cursors),
+		Popup:   popupRect(layout.Area),
 	}
 }
 

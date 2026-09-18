@@ -31,8 +31,11 @@ type Payload struct {
 	Colors    theme.Colors
 	HasColors bool
 	Found     []links.Link
-	// Drawn names panes whose overlay is already up.
-	Drawn   []string
+	// Popup is where the picker popup will sit on the surface, zero for
+	// any other placement.
+	Popup herdr.Rect
+	// Drawn names the frame layers already up, per pane.
+	Drawn   map[string][]string
 	WroteAt time.Time
 }
 

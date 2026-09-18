@@ -11,12 +11,15 @@ import (
 
 func TestParseScreenPanes(t *testing.T) {
 	t.Parallel()
-	layout := `{"result":{"layout":{"panes":[{"pane_id":"w1:p1","rect":{"x":0,"y":0,"width":206,"height":59}},{"pane_id":""},{"pane_id":"w1:p2","rect":{"x":0,"y":59,"width":206,"height":20}}]}}}`
+	layout := `{"result":{"layout":{"area":{"x":0,"y":0,"width":206,"height":79},"panes":[{"pane_id":"w1:p1","rect":{"x":0,"y":0,"width":206,"height":59}},{"pane_id":""},{"pane_id":"w1:p2","rect":{"x":0,"y":59,"width":206,"height":20}}]}}}`
 	got, err := parseScreenPanes([]byte(layout), "w1:p1")
 	if err != nil {
 		t.Fatalf("parseScreenPanes: %v", err)
 	}
-	want := []Pane{{ID: "w1:p1", Width: 206, Height: 59}, {ID: "w1:p2", Width: 206, Height: 20}}
+	want := Layout{
+		Area:  Rect{Width: 206, Height: 79},
+		Panes: []Pane{{ID: "w1:p1", Width: 206, Height: 59}, {ID: "w1:p2", Y: 59, Width: 206, Height: 20}},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseScreenPanes() = %+v, want %+v", got, want)
 	}
@@ -26,7 +29,7 @@ func TestParseScreenPanesFallsBack(t *testing.T) {
 	t.Parallel()
 	for _, out := range []string{`{"result":{"layout":{"panes":[]}}}`, "not json"} {
 		got, _ := parseScreenPanes([]byte(out), "w1:p9")
-		if want := []Pane{{ID: "w1:p9"}}; !reflect.DeepEqual(got, want) {
+		if want := (Layout{Panes: []Pane{{ID: "w1:p9"}}}); !reflect.DeepEqual(got, want) {
 			t.Fatalf("parseScreenPanes(%q) = %+v, want %+v", out, got, want)
 		}
 	}
@@ -92,8 +95,9 @@ func TestScreenPanesOverSocket(t *testing.T) {
 		return [][]byte{mustJSON(t, map[string]any{
 			"id": request["id"],
 			"result": map[string]any{"type": "pane_layout", "layout": map[string]any{
+				"area": map[string]any{"x": 0, "y": 0, "width": 206, "height": 59},
 				"panes": []any{
-					map[string]any{"pane_id": "w1:p1", "rect": map[string]any{"width": 206, "height": 59}},
+					map[string]any{"pane_id": "w1:p1", "rect": map[string]any{"x": 0, "y": 0, "width": 206, "height": 59}},
 					map[string]any{"pane_id": ""},
 				},
 			}},
@@ -104,7 +108,8 @@ func TestScreenPanesOverSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScreenPanes: %v", err)
 	}
-	if want := []Pane{{ID: "w1:p1", Width: 206, Height: 59}}; !reflect.DeepEqual(got, want) {
+	want := Layout{Area: Rect{Width: 206, Height: 59}, Panes: []Pane{{ID: "w1:p1", Width: 206, Height: 59}}}
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ScreenPanes() = %+v, want %+v", got, want)
 	}
 	request := <-requests
@@ -145,7 +150,7 @@ func TestSocketFallsBackToCLI(t *testing.T) {
 
 	if panes, err := client.ScreenPanes(context.Background(), "w1:p9"); err == nil {
 		t.Fatal("expected an error when both paths fail")
-	} else if want := []Pane{{ID: "w1:p9"}}; !reflect.DeepEqual(panes, want) {
+	} else if want := (Layout{Panes: []Pane{{ID: "w1:p9"}}}); !reflect.DeepEqual(panes, want) {
 		t.Fatalf("ScreenPanes() = %+v, want %+v", panes, want)
 	}
 	if _, err := client.PaneLines(context.Background(), "w1:p9"); err == nil {

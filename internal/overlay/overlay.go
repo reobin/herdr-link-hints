@@ -41,12 +41,38 @@ type Size struct {
 	Rows int
 }
 
-// Scene is one pane's overlay inputs.
+// Rect is a cell rectangle in the viewport.
+type Rect struct {
+	Row  int
+	Col  int
+	Rows int
+	Cols int
+}
+
+func (r Rect) Empty() bool { return r.Rows <= 0 || r.Cols <= 0 }
+
+// Intersect is the cells both rects cover, empty when none.
+func (r Rect) Intersect(o Rect) Rect {
+	row, col := max(r.Row, o.Row), max(r.Col, o.Col)
+	bottom := min(r.Row+r.Rows, o.Row+o.Rows)
+	right := min(r.Col+r.Cols, o.Col+o.Cols)
+	if bottom <= row || right <= col {
+		return Rect{}
+	}
+	return Rect{Row: row, Col: col, Rows: bottom - row, Cols: right - col}
+}
+
+func (r Rect) overlaps(o Rect) bool { return !r.Intersect(o).Empty() }
+
+// Scene is one pane's overlay inputs. Avoid is the cells a popup will
+// cover: Herdr hides an image that touches a popup, so no badge lands
+// there and frames tile around it.
 type Scene struct {
 	Badges   []Badge
 	Colors   theme.Colors
 	Cell     Cell
 	Viewport Size
+	Avoid    Rect
 }
 
 // Frame is an encoded overlay plus placement.
@@ -60,11 +86,19 @@ type Frame struct {
 	Cols   int
 }
 
+// Tile is one piece of a frame, named by the side of the avoided rect it
+// sits on; a frame with nothing to avoid is one unnamed tile.
+type Tile struct {
+	Side  string
+	Frame Frame
+}
+
 // Plan resolves badges to cells; placement ignores Dim and Typed.
 type Plan struct {
 	placed   []placement
 	cell     Cell
 	viewport Size
+	avoid    Rect
 	palette  color.Palette
 	links    []Badge
 }
@@ -76,10 +110,12 @@ func NewPlan(s Scene) (Plan, error) {
 	if s.Viewport.Cols <= 0 || s.Viewport.Rows <= 0 {
 		return Plan{}, fmt.Errorf("viewport %dx%d", s.Viewport.Cols, s.Viewport.Rows)
 	}
+	avoid := s.Avoid.Intersect(Rect{Rows: s.Viewport.Rows, Cols: s.Viewport.Cols})
 	return Plan{
-		placed:   clip(s.Badges, s.Viewport),
+		placed:   clip(s.Badges, s.Viewport, avoid),
 		cell:     s.Cell,
 		viewport: s.Viewport,
+		avoid:    avoid,
 		palette:  newPalette(s.Colors),
 		links:    slices.Clone(s.Badges),
 	}, nil
@@ -106,10 +142,51 @@ func (p Plan) SameLinks(badges []Badge) bool {
 
 // Frame renders the whole viewport.
 func (p Plan) Frame(badges []Badge) (Frame, error) {
-	img := image.NewPaletted(
-		image.Rect(0, 0, p.viewport.Cols*p.cell.Width, p.viewport.Rows*p.cell.Height),
-		p.palette,
-	)
+	whole := Rect{Rows: p.viewport.Rows, Cols: p.viewport.Cols}
+	return p.encode(p.draw(whole, badges), whole)
+}
+
+// Tiles renders the viewport in pieces that keep clear of the avoided
+// rect, skipping pieces with nothing drawn on them.
+func (p Plan) Tiles(badges []Badge) ([]Tile, error) {
+	var tiles []Tile
+	for _, piece := range around(Rect{Rows: p.viewport.Rows, Cols: p.viewport.Cols}, p.avoid) {
+		if !p.touches(piece.Rect) {
+			continue
+		}
+		frame, err := p.encode(p.draw(piece.Rect, badges), piece.Rect)
+		if err != nil {
+			return nil, err
+		}
+		tiles = append(tiles, Tile{Side: piece.side, Frame: frame})
+	}
+	return tiles, nil
+}
+
+// Layer draws one badge and its link box, cut back to the side of the
+// avoided rect the badge is on when the box runs under it.
+func (p Plan) Layer(i int, badges []Badge) (Frame, error) {
+	pl := p.placed[i]
+	area := pl.bounds()
+	if area.overlaps(p.avoid) {
+		for _, piece := range around(area, p.avoid) {
+			if piece.overlaps(pl.badgeRect()) {
+				area = piece.Rect
+				break
+			}
+		}
+	}
+	img := image.NewPaletted(cellRect(area.Row, area.Col, area.Cols, area.Rows, p.cell), p.palette)
+	dim, typed := p.stateOf(badges, pl)
+	boxLink(img, pl, p.cell, dim)
+	drawBadge(img, pl, p.cell, dim, typed)
+	return p.encode(img, area)
+}
+
+// draw renders every placed badge into an image covering area; drawing
+// clips to the image, so cells outside stay out.
+func (p Plan) draw(area Rect, badges []Badge) *image.Paletted {
+	img := image.NewPaletted(cellRect(area.Row, area.Col, area.Cols, area.Rows, p.cell), p.palette)
 	for _, pl := range p.placed {
 		dim, _ := p.stateOf(badges, pl)
 		boxLink(img, pl, p.cell, dim)
@@ -118,21 +195,17 @@ func (p Plan) Frame(badges []Badge) (Frame, error) {
 		dim, typed := p.stateOf(badges, pl)
 		drawBadge(img, pl, p.cell, dim, typed)
 	}
-	return p.encode(img, 0, 0, p.viewport.Rows, p.viewport.Cols)
+	return img
 }
 
-// Layer draws one badge and its link box.
-func (p Plan) Layer(i int, badges []Badge) (Frame, error) {
-	pl := p.placed[i]
-	row := min(pl.row, pl.linkRow)
-	col := min(pl.col, pl.linkCol)
-	rows := max(pl.row, pl.linkRow) + 1 - row
-	cols := max(pl.col+len(pl.code), pl.linkCol+pl.width) - col
-	img := image.NewPaletted(cellRect(row, col, cols, rows, p.cell), p.palette)
-	dim, typed := p.stateOf(badges, pl)
-	boxLink(img, pl, p.cell, dim)
-	drawBadge(img, pl, p.cell, dim, typed)
-	return p.encode(img, row, col, rows, cols)
+// touches reports whether any badge or link box reaches into area.
+func (p Plan) touches(area Rect) bool {
+	for _, pl := range p.placed {
+		if pl.badgeRect().overlaps(area) || pl.linkRect().overlaps(area) {
+			return true
+		}
+	}
+	return false
 }
 
 // stateOf is how a placed badge is drawn now.
@@ -144,7 +217,7 @@ func (p Plan) stateOf(badges []Badge, pl placement) (dim bool, typed int) {
 	return b.Dim, min(max(b.Typed, 0), len(pl.code))
 }
 
-func (p Plan) encode(img *image.Paletted, row, col, rows, cols int) (Frame, error) {
+func (p Plan) encode(img *image.Paletted, area Rect) (Frame, error) {
 	var buf bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
 	if err := encoder.Encode(&buf, img); err != nil {
@@ -157,11 +230,40 @@ func (p Plan) encode(img *image.Paletted, row, col, rows, cols int) (Frame, erro
 		PNG:    buf.Bytes(),
 		Width:  img.Rect.Dx(),
 		Height: img.Rect.Dy(),
-		Row:    row,
-		Col:    col,
-		Rows:   rows,
-		Cols:   cols,
+		Row:    area.Row,
+		Col:    area.Col,
+		Rows:   area.Rows,
+		Cols:   area.Cols,
 	}, nil
+}
+
+// piece is one side of a rect once a hole is cut out of it.
+type piece struct {
+	side string
+	Rect
+}
+
+// around splits bounds into the bands above, below, left and right of
+// hole, dropping empty ones. Without a hole it is bounds alone, unnamed.
+func around(bounds, hole Rect) []piece {
+	hole = hole.Intersect(bounds)
+	if hole.Empty() {
+		return []piece{{"", bounds}}
+	}
+	bottom, right := hole.Row+hole.Rows, hole.Col+hole.Cols
+	candidates := []piece{
+		{"top", Rect{Row: bounds.Row, Col: bounds.Col, Rows: hole.Row - bounds.Row, Cols: bounds.Cols}},
+		{"bottom", Rect{Row: bottom, Col: bounds.Col, Rows: bounds.Row + bounds.Rows - bottom, Cols: bounds.Cols}},
+		{"left", Rect{Row: hole.Row, Col: bounds.Col, Rows: hole.Rows, Cols: hole.Col - bounds.Col}},
+		{"right", Rect{Row: hole.Row, Col: right, Rows: hole.Rows, Cols: bounds.Col + bounds.Cols - right}},
+	}
+	pieces := make([]piece, 0, len(candidates))
+	for _, c := range candidates {
+		if !c.Empty() {
+			pieces = append(pieces, c)
+		}
+	}
+	return pieces
 }
 
 // Render draws the whole viewport without keeping the plan.
