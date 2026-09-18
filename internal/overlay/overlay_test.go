@@ -399,7 +399,7 @@ func TestClipKeepsBadgesOffEachOther(t *testing.T) {
 	placed := clip([]Badge{
 		{Row: 5, Col: 10, Width: 1, Code: "as"},
 		{Row: 5, Col: 11, Width: 1, Code: "df"},
-	}, wide)
+	}, wide, Rect{})
 	if len(placed) != 2 {
 		t.Fatalf("clip() placed %d badges, want 2", len(placed))
 	}
@@ -500,7 +500,7 @@ func TestClipPlacesThreeBadgesOnOneRow(t *testing.T) {
 		{Row: 5, Col: 11, Width: 1, Code: "df"},
 		{Row: 5, Col: 12, Width: 1, Code: "gh"},
 	}
-	placed := clip(badges, wide)
+	placed := clip(badges, wide, Rect{})
 	if len(placed) != 3 {
 		t.Fatalf("clip() placed %d badges, want 3", len(placed))
 	}

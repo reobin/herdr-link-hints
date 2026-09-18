@@ -11,14 +11,35 @@ type placement struct {
 	source  int
 }
 
+func (p placement) badgeRect() Rect { return Rect{Row: p.row, Col: p.col, Rows: 1, Cols: len(p.code)} }
+
+func (p placement) linkRect() Rect {
+	return Rect{Row: p.linkRow, Col: p.linkCol, Rows: 1, Cols: p.width}
+}
+
+func (p placement) bounds() Rect {
+	row := min(p.row, p.linkRow)
+	col := min(p.col, p.linkCol)
+	return Rect{
+		Row:  row,
+		Col:  col,
+		Rows: max(p.row, p.linkRow) + 1 - row,
+		Cols: max(p.col+len(p.code), p.linkCol+p.width) - col,
+	}
+}
+
 type point struct {
 	row int
 	col int
 }
 
-// clip places badges, dropping ones the viewport cannot hold.
-func clip(badges []Badge, viewport Size) []placement {
+// clip places badges, dropping ones the viewport cannot hold and ones the
+// avoided rect would hide.
+func clip(badges []Badge, viewport Size, avoid Rect) []placement {
 	taken := linkCells(badges, viewport)
+	for row := avoid.Row; row < avoid.Row+avoid.Rows; row++ {
+		occupy(taken, point{row, avoid.Col}, avoid.Cols)
+	}
 	var out []placement
 	for i, b := range badges {
 		if b.Row < 0 || b.Row >= viewport.Rows || b.Col < 0 || b.Col >= viewport.Cols {
@@ -29,8 +50,11 @@ func clip(badges []Badge, viewport Size) []placement {
 			continue
 		}
 		row, col := place(b, len(code), viewport, taken)
-		// A code cut short is the wrong thing to type.
+		// A code cut short, or half hidden, is the wrong thing to type.
 		if col < 0 || col+len(code) > viewport.Cols {
+			continue
+		}
+		if avoid.overlaps(Rect{Row: row, Col: col, Rows: 1, Cols: len(code)}) {
 			continue
 		}
 		occupy(taken, point{row, col}, len(code))

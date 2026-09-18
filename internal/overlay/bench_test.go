@@ -105,3 +105,23 @@ func BenchmarkNarrowByLayer(b *testing.B) {
 		}
 	}
 }
+
+// The same keystroke paid as tiles around the default popup footprint.
+func BenchmarkNarrowByTiles(b *testing.B) {
+	s := realScene(150)
+	s.Avoid = Rect{Row: 25, Col: 94, Rows: 7, Cols: 16}
+	plan, err := NewPlan(s)
+	if err != nil {
+		b.Fatal(err)
+	}
+	narrowed := dimAll(s.Badges)
+	for i := range 6 {
+		narrowed[i].Dim, narrowed[i].Typed = false, 1
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := plan.Tiles(narrowed); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

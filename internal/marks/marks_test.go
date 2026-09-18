@@ -22,6 +22,7 @@ type graphicsCall struct {
 	method string
 	pane   string
 	layer  string
+	at     overlay.Rect
 }
 
 func (c graphicsCall) String() string { return c.method + " " + c.pane + " " + c.layer }
@@ -96,15 +97,24 @@ func startGraphicsServer(t *testing.T) (*graphicsServer, string) {
 						ID     string `json:"id"`
 						Method string `json:"method"`
 						Params struct {
-							Pane  string `json:"pane_id"`
-							Layer string `json:"layer_id"`
+							Pane      string `json:"pane_id"`
+							Layer     string `json:"layer_id"`
+							Placement struct {
+								Row  int `json:"viewport_row"`
+								Col  int `json:"viewport_col"`
+								Rows int `json:"grid_rows"`
+								Cols int `json:"grid_cols"`
+							} `json:"placement"`
 						} `json:"params"`
 					}
 					if err := decoder.Decode(&request); err != nil {
 						return
 					}
 					reply := map[string]any{"id": request.ID, "result": map[string]any{}}
-					if server.record(graphicsCall{request.Method, request.Params.Pane, request.Params.Layer}) {
+					at := request.Params.Placement
+					call := graphicsCall{request.Method, request.Params.Pane, request.Params.Layer,
+						overlay.Rect{Row: at.Row, Col: at.Col, Rows: at.Rows, Cols: at.Cols}}
+					if server.record(call) {
 						reply = map[string]any{"id": request.ID, "error": map[string]any{
 							"code": "limit_exceeded", "message": "too many layers",
 						}}
@@ -176,7 +186,7 @@ func TestDrawBadgesSetsBeforeClearing(t *testing.T) {
 
 	badges := testBadges(4)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.Adopt([]string{"w1:p1"}, all)
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, all)
 	m.Prime(ctx, all)
 
 	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 1)})
@@ -211,7 +221,7 @@ func TestDrawBadgesRedrawsOnlyWhatChanged(t *testing.T) {
 
 	badges := testBadges(4)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.Adopt([]string{"w1:p1"}, all)
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, all)
 	m.Prime(ctx, all)
 	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0, 1, 2)})
 
@@ -246,7 +256,7 @@ func TestDrawFallsBackToAFrameWhenALayerIsRefused(t *testing.T) {
 
 	badges := testBadges(4)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.Adopt([]string{"w1:p1"}, all)
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, all)
 	m.Prime(ctx, all)
 
 	server.mu.Lock()
@@ -262,7 +272,7 @@ func TestDrawFallsBackToAFrameWhenALayerIsRefused(t *testing.T) {
 	}
 	m.mu.Lock()
 	marks := m.panes["w1:p1"]
-	up, frameUp := len(marks.layers), marks.frameUp
+	up, frameUp := len(marks.layers), len(marks.frame) > 0
 	m.mu.Unlock()
 	if !frameUp {
 		t.Fatal("the pane should be back on its frame")
@@ -281,7 +291,7 @@ func TestClearTakesDownEveryLayer(t *testing.T) {
 
 	badges := testBadges(3)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.Adopt([]string{"w1:p1"}, all)
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, all)
 	m.Prime(ctx, all)
 	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
 	m.Clear(ctx)
@@ -303,7 +313,7 @@ func TestClearTakesDownEveryLayer(t *testing.T) {
 func claimsOf(matches ...int) []claim {
 	claims := make([]claim, len(matches))
 	for i, n := range matches {
-		claims[i] = claim{pane: string(rune('a' + i)), matches: n, perPane: 16}
+		claims[i] = claim{pane: string(rune('a' + i)), matches: n, held: 2, perPane: 16}
 	}
 	return claims
 }
@@ -352,11 +362,11 @@ func TestLayerBudgetTakesTheCheapestPanesFirst(t *testing.T) {
 // TestLayerBudgetRefusesPastThePerPaneCap pins the per-pane cap.
 func TestLayerBudgetRefusesPastThePerPaneCap(t *testing.T) {
 	t.Parallel()
-	claims := []claim{{pane: "a", matches: 15, perPane: 16}}
+	claims := []claim{{pane: "a", matches: 15, held: 2, perPane: 16}}
 	if layered := layerBudget(claims, 0, maxLayersTotal); layered["a"] {
 		t.Fatal("15 badges plus the backdrop and the frame is over a 16-layer pane")
 	}
-	claims = []claim{{pane: "a", matches: 14, perPane: 16}}
+	claims = []claim{{pane: "a", matches: 14, held: 2, perPane: 16}}
 	if layered := layerBudget(claims, 0, maxLayersTotal); !layered["a"] {
 		t.Fatal("14 badges plus the backdrop and the frame fits a 16-layer pane")
 	}
@@ -382,7 +392,7 @@ func TestDrawUsesAFrameUntilTheBackdropIsUp(t *testing.T) {
 	ctx := context.Background()
 
 	badges := testBadges(3)
-	m.Adopt([]string{"w1:p1"}, map[string][]overlay.Badge{"w1:p1": badges})
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, map[string][]overlay.Badge{"w1:p1": badges})
 	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
 
 	for _, layer := range server.layerSets() {
@@ -401,7 +411,7 @@ func TestDrawRejectsAPlanFromADifferentScan(t *testing.T) {
 
 	badges := testBadges(3)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.Adopt([]string{"w1:p1"}, all)
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, all)
 	m.Prime(ctx, all)
 
 	moved := slices.Clone(badges)
@@ -437,7 +447,7 @@ func TestPrimeStrandsNothingAfterClear(t *testing.T) {
 
 	badges := testBadges(3)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.Adopt([]string{"w1:p1"}, all)
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, all)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -474,7 +484,7 @@ func TestDrawFallsBackWhenARuledOutBadgeShowsTypedProgress(t *testing.T) {
 
 	badges := testBadges(4)
 	all := map[string][]overlay.Badge{"w1:p1": badges}
-	m.Adopt([]string{"w1:p1"}, all)
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, all)
 	m.Prime(ctx, all)
 
 	shared := narrow(badges, 0)
@@ -530,6 +540,31 @@ func TestALinkLessPaneCostsNothing(t *testing.T) {
 	}
 }
 
+// TestClaimsReservesTheFallbackFrame pins the frame in held once it is down.
+func TestClaimsReservesTheFallbackFrame(t *testing.T) {
+	t.Parallel()
+	_, socket := startGraphicsServer(t)
+	m := testMarker(t, socket, "w1:p1")
+	ctx := context.Background()
+
+	badges := testBadges(3)
+	all := map[string][]overlay.Badge{"w1:p1": badges}
+	m.Prime(ctx, all)
+	m.Draw(ctx, map[string][]overlay.Badge{"w1:p1": narrow(badges, 0)})
+
+	if frame := m.panes["w1:p1"].frame; len(frame) != 0 {
+		t.Fatalf("the frame is still up as %v, so the fallback is not what held covers", frame)
+	}
+	claims, _ := m.claims(all)
+	if len(claims) != 1 {
+		t.Fatalf("claims = %+v; want the one pane that narrows by layer", claims)
+	}
+	want := len(m.panes["w1:p1"].dim) + m.views["w1:p1"].frameCost()
+	if claims[0].held != want {
+		t.Fatalf("held = %d, want %d: the frame this pane falls back to is unreserved", claims[0].held, want)
+	}
+}
+
 // Adopted frames still clear when the scan finds nothing.
 func TestALinkLessPaneStillClearsAnAdoptedFrame(t *testing.T) {
 	t.Parallel()
@@ -537,11 +572,14 @@ func TestALinkLessPaneStillClearsAnAdoptedFrame(t *testing.T) {
 	m := testMarker(t, socket, "w1:p1")
 	ctx := context.Background()
 
-	m.Adopt([]string{"w1:p1"}, map[string][]overlay.Badge{"w1:p1": testBadges(3)})
+	m.Adopt(map[string][]string{"w1:p1": {overlay.LayerID}}, map[string][]overlay.Badge{"w1:p1": testBadges(3)})
 	m.Draw(ctx, map[string][]overlay.Badge{})
 
-	if sets := server.layerSets(); !slices.Contains(sets, overlay.LayerID) {
+	if indexOf(server.seen(), "pane.graphics.clear w1:p1 "+overlay.LayerID) < 0 {
 		t.Fatalf("left an adopted frame up: %v", server.seen())
+	}
+	if sets := server.layerSets(); len(sets) != 0 {
+		t.Fatalf("drew %v for a pane with no links", sets)
 	}
 }
 
@@ -577,7 +615,7 @@ func TestMarkerSkipsOnlyUnchangedPanes(t *testing.T) {
 	badges := []overlay.Badge{{Row: 1, Col: 2, Width: 4, Code: "as"}}
 	m := &Marker{
 		panes: map[string]*paneMarks{
-			"w1:p1": {frameUp: true, shown: badges},
+			"w1:p1": {frame: []string{overlay.LayerID}, shown: badges},
 		},
 	}
 
@@ -595,7 +633,7 @@ func TestMarkerSkipsOnlyUnchangedPanes(t *testing.T) {
 		t.Fatal("a pane never drawn on has nothing on screen to keep")
 	}
 
-	m.panes["w1:p1"].frameUp = false
+	m.panes["w1:p1"].frame = nil
 	if m.unchanged("w1:p1", badges) {
 		t.Fatal("a pane whose layer was cleared has to be drawn again")
 	}
