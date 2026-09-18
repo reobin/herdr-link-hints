@@ -11,10 +11,8 @@ const (
 	popupMinHeight = 4
 )
 
-// PopupRect is where Herdr centres a popup of the given outer size on the
-// surface, mirroring its geometry: a size is cells, a percentage of the
-// surface, or blank for half of it, clamped to the minimum and the
-// surface. False when the popup cannot open at all.
+// PopupRect is where Herdr centres a popup of the given outer size,
+// mirroring its geometry. False when the popup cannot open at all.
 func PopupRect(area Rect, width, height string) (Rect, bool) {
 	if area.Width <= 0 || area.Height <= 0 {
 		return Rect{}, false
@@ -32,8 +30,8 @@ func PopupRect(area Rect, width, height string) (Rect, bool) {
 	}, true
 }
 
-// popupSizeCells resolves one size the way the server does; a value the
-// server would refuse falls to its default, as OpenPane drops it.
+// popupSizeCells resolves one size the way the server does, falling to
+// the default for a value the server would refuse.
 func popupSizeCells(size string, available int) int {
 	if percent, ok := strings.CutSuffix(size, "%"); ok {
 		n, err := strconv.Atoi(percent)

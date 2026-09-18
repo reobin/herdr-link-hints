@@ -34,8 +34,8 @@ func badgeLayerID(i int) string {
 	return overlay.LayerID + "-" + strconv.Itoa(i)
 }
 
-// tileLayerID names a frame or backdrop tile by the side of the popup it
-// sits on; a whole frame keeps the bare id.
+// tileLayerID names a tile by the side it sits on; a whole frame keeps
+// the bare id.
 func tileLayerID(base, side string) string {
 	if side == "" {
 		return base
@@ -71,8 +71,7 @@ func WithTrail(t *Trail) Option {
 }
 
 // WithPopup names the surface cells the picker popup will cover. Herdr
-// hides an image that touches a popup, so frames tile around it and no
-// badge lands under it.
+// hides an image that touches a popup, so nothing may reach into them.
 func WithPopup(r herdr.Rect) Option {
 	return func(m *Marker) { m.popup = r }
 }
@@ -152,10 +151,8 @@ func Content(pane herdr.Pane, viewportRows int) overlay.Size {
 	return overlay.Size{Rows: viewportRows, Cols: pane.Width - (pane.Height - viewportRows)}
 }
 
-// Avoid is the popup's footprint in a pane's viewport cells, a cell wider
-// on every side: Herdr hides an image whole when it so much as touches
-// the popup, so the margin absorbs a border miscount. Empty when they do
-// not meet.
+// Avoid is the popup's footprint in a pane's viewport cells, widened by a
+// cell so a border miscount cannot leave a tile touching the popup.
 func Avoid(pane herdr.Pane, size overlay.Size, popup herdr.Rect) overlay.Rect {
 	if popup.Width <= 0 || popup.Height <= 0 {
 		return overlay.Rect{}
@@ -272,8 +269,8 @@ func allDim(badges []overlay.Badge) []overlay.Badge {
 	return out
 }
 
-// claim is one pane's cost to narrow by layer: the tiles it holds plus a
-// layer per match.
+// claim is one pane's cost to narrow by layer: tiles held plus a layer
+// per match.
 type claim struct {
 	pane    string
 	matches int
@@ -439,7 +436,7 @@ func (m *Marker) commitBadges(pane string, up map[int]overlay.Badge) {
 }
 
 // drawFrame re-encodes the viewport as tiles, replacing each in place and
-// taking down the tiles the new frame no longer needs.
+// dropping the ones the new frame no longer needs.
 func (m *Marker) drawFrame(ctx context.Context, pane string, view paneView, badges []overlay.Badge) {
 	unchanged := m.unchanged(pane, badges)
 	m.mu.Lock()
@@ -487,8 +484,7 @@ func (m *Marker) drawFrame(ctx context.Context, pane string, view paneView, badg
 	m.commitBadges(pane, up)
 }
 
-// setTiles puts tiles up under base, side by side, and reports the layer
-// ids that made it before any error.
+// setTiles puts tiles up under base and reports the ids that made it.
 func (m *Marker) setTiles(ctx context.Context, pane, base string, z int, tiles []overlay.Tile) ([]string, error) {
 	var up []string
 	for _, tile := range tiles {

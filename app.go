@@ -190,8 +190,7 @@ func (a *app) marker(colors theme.Colors, p handoff.Payload) *marks.Marker {
 		marks.WithTrail(a.trail), marks.WithPopup(p.Popup))
 }
 
-// popupRect is where the picker popup will sit, zero when the surface
-// cannot hold one.
+// popupRect is where the picker popup will sit, zero when it cannot open.
 func popupRect(area herdr.Rect) herdr.Rect {
 	rect, ok := herdr.PopupRect(area, config.PopupWidth, config.PopupHeight)
 	if !ok {

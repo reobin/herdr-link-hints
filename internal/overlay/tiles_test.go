@@ -26,9 +26,8 @@ func surrounding() []Badge {
 	}
 }
 
-// Herdr hides an image whole when it touches the popup, so every tile has
-// to keep off the avoided cells, and together they must show everything a
-// frame would have shown outside them.
+// Every tile keeps off the avoided cells, and together they show all a
+// whole frame would outside them.
 func TestTilesKeepClearOfTheAvoidedRect(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 40, Rows: 8}
@@ -133,8 +132,7 @@ func TestTilesSkipSidesWithNothingDrawn(t *testing.T) {
 	}
 }
 
-// A badge would be hidden under the popup, so it moves out from under it,
-// and one with nowhere to go is left out rather than shown half hidden.
+// A badge under the popup moves out, or is left out with nowhere to go.
 func TestClipKeepsBadgesOutOfTheAvoidedRect(t *testing.T) {
 	t.Parallel()
 	viewport := Size{Cols: 40, Rows: 8}
@@ -230,8 +228,8 @@ func pieceSides(pieces []piece) []string {
 	return out
 }
 
-// sameColor compares by channel: a decoded palette entry and a composed
-// pixel carry different colour types for the same colour.
+// sameColor compares by channel: decoded and composed pixels carry
+// different colour types for the same colour.
 func sameColor(a, b color.Color) bool {
 	ar, ag, ab, aa := a.RGBA()
 	br, bg, bb, ba := b.RGBA()

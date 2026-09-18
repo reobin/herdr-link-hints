@@ -31,8 +31,7 @@ type Payload struct {
 	Colors    theme.Colors
 	HasColors bool
 	Found     []links.Link
-	// Popup is where the picker popup will sit on the surface, zero for
-	// any other placement.
+	// Popup is where the picker popup will sit on the surface.
 	Popup herdr.Rect
 	// Drawn names the frame layers already up, per pane.
 	Drawn   map[string][]string

@@ -17,7 +17,6 @@ func (p placement) linkRect() Rect {
 	return Rect{Row: p.linkRow, Col: p.linkCol, Rows: 1, Cols: p.width}
 }
 
-// bounds covers the badge and its link box.
 func (p placement) bounds() Rect {
 	row := min(p.row, p.linkRow)
 	col := min(p.col, p.linkCol)
@@ -34,8 +33,8 @@ type point struct {
 	col int
 }
 
-// clip places badges, dropping ones the viewport cannot hold and ones
-// that would sit under the avoided rect, where Herdr would hide them.
+// clip places badges, dropping ones the viewport cannot hold and ones the
+// avoided rect would hide.
 func clip(badges []Badge, viewport Size, avoid Rect) []placement {
 	taken := linkCells(badges, viewport)
 	for row := avoid.Row; row < avoid.Row+avoid.Rows; row++ {

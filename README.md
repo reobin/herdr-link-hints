@@ -34,10 +34,6 @@ go build -trimpath -o picker .
 herdr plugin link /path/to/herdr-link-hints
 ```
 
-herdr 0.9.1 hides any image that touches a popup, so the badges tile
-around the picker popup and none is drawn under it. Links there stay in
-the list.
-
 ## License
 
 [MIT](LICENSE)

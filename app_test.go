@@ -632,8 +632,7 @@ func TestPickFailsWhenTheBrowserRefusesTheURL(t *testing.T) {
 	}
 }
 
-// The popup footprint rides in the handoff, so both processes keep their
-// badges off the same cells.
+// The popup footprint rides in the handoff, so both processes keep off it.
 func TestGatherCarriesThePopupFootprint(t *testing.T) {
 	t.Parallel()
 	f := newFakeClient("see https://a.io/x for more")

@@ -10,9 +10,8 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/overlay"
 )
 
-// The live layout this was calibrated against: two bordered 103x59 panes
-// side by side on a 206x59 surface, and the default 14x5 popup centred
-// on it, which lands astride both.
+// Calibrated against two bordered 103x59 panes on a 206x59 surface, with
+// the default 14x5 popup centred astride both.
 func TestAvoidMapsThePopupIntoEachPane(t *testing.T) {
 	t.Parallel()
 	popup := herdr.Rect{X: 96, Y: 27, Width: 14, Height: 5}
@@ -20,8 +19,7 @@ func TestAvoidMapsThePopupIntoEachPane(t *testing.T) {
 	right := herdr.Pane{ID: "w1:p2", X: 103, Y: 0, Width: 103, Height: 59}
 	size := Content(left, 57)
 
-	// The footprint is a cell wider on every side, in viewport cells, so
-	// the pane's border shifts it by one and the margin widens it by one.
+	// Shifted by the pane border, and a cell wider on every side.
 	if got, want := Avoid(left, size, popup), (overlay.Rect{Row: 25, Col: 94, Rows: 7, Cols: 7}); got != want {
 		t.Fatalf("Avoid(left) = %+v, want %+v", got, want)
 	}
@@ -47,8 +45,8 @@ func avoidingMarker(t *testing.T, socket string, avoid overlay.Rect) *Marker {
 	return m
 }
 
-// Herdr hides an image whole when it touches the popup, so no tile may
-// reach into the footprint; the frame comes up as named side tiles.
+// No tile may reach into the footprint, so the frame comes up as named
+// side tiles.
 func TestDrawTilesAroundThePopup(t *testing.T) {
 	t.Parallel()
 	server, socket := startGraphicsServer(t)

@@ -2,8 +2,8 @@ package herdr
 
 import "testing"
 
-// The live 206x59 surface and the default 14x5 popup are the numbers this
-// was calibrated against; the rest mirrors Herdr's resolve_popup_geometry.
+// Calibrated against a live 206x59 surface and the default 14x5 popup,
+// mirroring Herdr's resolve_popup_geometry.
 func TestPopupRect(t *testing.T) {
 	t.Parallel()
 	surface := Rect{Width: 206, Height: 59}

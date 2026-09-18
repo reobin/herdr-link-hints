@@ -110,8 +110,7 @@ type Pane struct {
 	Height int
 }
 
-// Layout is the panes sharing a screen and the surface they tile, which is
-// also what a popup is centred on.
+// Layout is the panes sharing a screen and the surface a popup centres on.
 type Layout struct {
 	Area  Rect
 	Panes []Pane

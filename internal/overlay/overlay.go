@@ -65,8 +65,7 @@ func (r Rect) Intersect(o Rect) Rect {
 func (r Rect) overlaps(o Rect) bool { return !r.Intersect(o).Empty() }
 
 // Scene is one pane's overlay inputs. Avoid is the cells a popup will
-// cover: Herdr hides an image that touches a popup, so no badge lands
-// there and frames tile around it.
+// cover, which no badge or tile may touch.
 type Scene struct {
 	Badges   []Badge
 	Colors   theme.Colors
@@ -87,7 +86,7 @@ type Frame struct {
 }
 
 // Tile is one piece of a frame, named by the side of the avoided rect it
-// sits on; a frame with nothing to avoid is one unnamed tile.
+// sits on; nothing to avoid is one unnamed tile.
 type Tile struct {
 	Side  string
 	Frame Frame
@@ -147,7 +146,7 @@ func (p Plan) Frame(badges []Badge) (Frame, error) {
 }
 
 // Tiles renders the viewport in pieces that keep clear of the avoided
-// rect, skipping pieces with nothing drawn on them.
+// rect, skipping the empty ones.
 func (p Plan) Tiles(badges []Badge) ([]Tile, error) {
 	var tiles []Tile
 	for _, piece := range around(Rect{Rows: p.viewport.Rows, Cols: p.viewport.Cols}, p.avoid) {
@@ -163,8 +162,8 @@ func (p Plan) Tiles(badges []Badge) ([]Tile, error) {
 	return tiles, nil
 }
 
-// Layer draws one badge and its link box, cut back to the side of the
-// avoided rect the badge is on when the box runs under it.
+// Layer draws one badge and its link box, cut back to the badge's side
+// when the box runs under the avoided rect.
 func (p Plan) Layer(i int, badges []Badge) (Frame, error) {
 	pl := p.placed[i]
 	area := pl.bounds()
@@ -183,8 +182,8 @@ func (p Plan) Layer(i int, badges []Badge) (Frame, error) {
 	return p.encode(img, area)
 }
 
-// draw renders every placed badge into an image covering area; drawing
-// clips to the image, so cells outside stay out.
+// draw renders every placed badge into an image covering area, which
+// clips whatever falls outside.
 func (p Plan) draw(area Rect, badges []Badge) *image.Paletted {
 	img := image.NewPaletted(cellRect(area.Row, area.Col, area.Cols, area.Rows, p.cell), p.palette)
 	for _, pl := range p.placed {
@@ -198,7 +197,6 @@ func (p Plan) draw(area Rect, badges []Badge) *image.Paletted {
 	return img
 }
 
-// touches reports whether any badge or link box reaches into area.
 func (p Plan) touches(area Rect) bool {
 	for _, pl := range p.placed {
 		if pl.badgeRect().overlaps(area) || pl.linkRect().overlaps(area) {
@@ -244,7 +242,7 @@ type piece struct {
 }
 
 // around splits bounds into the bands above, below, left and right of
-// hole, dropping empty ones. Without a hole it is bounds alone, unnamed.
+// hole, dropping empty ones. No hole is bounds alone, unnamed.
 func around(bounds, hole Rect) []piece {
 	hole = hole.Intersect(bounds)
 	if hole.Empty() {
