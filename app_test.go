@@ -407,29 +407,18 @@ func themeEnv(t *testing.T) {
 func TestPaneSpec(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		cfg        config.Config
-		wantSize   bool
-		wantDebug  string
-		wantPlaced string
+		name      string
+		cfg       config.Config
+		wantDebug string
 	}{
 		{
-			name:       "a popup carries the configured size",
-			cfg:        config.Config{Placement: "popup", Width: "14", Height: "5"},
-			wantSize:   true,
-			wantPlaced: "popup",
+			name: "a popup carries the fixed size",
+			cfg:  config.Config{},
 		},
 		{
-			name:       "any other placement reflows, so it takes no size",
-			cfg:        config.Config{Placement: "right", Width: "14", Height: "5"},
-			wantPlaced: "right",
-		},
-		{
-			name:       "debug crosses into the pane process",
-			cfg:        config.Config{Placement: "popup", Width: "14", Height: "5", Debug: "debug.log"},
-			wantSize:   true,
-			wantDebug:  "debug.log",
-			wantPlaced: "popup",
+			name:      "debug crosses into the pane process",
+			cfg:       config.Config{Debug: "debug.log"},
+			wantDebug: "debug.log",
 		},
 	}
 	for _, tc := range tests {
@@ -439,12 +428,11 @@ func TestPaneSpec(t *testing.T) {
 			if spec.Plugin != pluginID || spec.Entrypoint != entrypoint {
 				t.Fatalf("paneSpec() = %q/%q, want %q/%q", spec.Plugin, spec.Entrypoint, pluginID, entrypoint)
 			}
-			if spec.Placement != tc.wantPlaced {
-				t.Fatalf("paneSpec() placement = %q, want %q", spec.Placement, tc.wantPlaced)
+			if spec.Placement != "popup" {
+				t.Fatalf("paneSpec() placement = %q, want %q", spec.Placement, "popup")
 			}
-			gotSize := spec.Width != "" || spec.Height != ""
-			if gotSize != tc.wantSize {
-				t.Fatalf("paneSpec() size = %sx%s, want size: %v", spec.Width, spec.Height, tc.wantSize)
+			if spec.Width != config.PopupWidth || spec.Height != config.PopupHeight {
+				t.Fatalf("paneSpec() size = %sx%s, want %sx%s", spec.Width, spec.Height, config.PopupWidth, config.PopupHeight)
 			}
 			if got := spec.Env["HINTS_DEBUG"]; got != tc.wantDebug {
 				t.Fatalf("paneSpec() HINTS_DEBUG = %q, want %q", got, tc.wantDebug)

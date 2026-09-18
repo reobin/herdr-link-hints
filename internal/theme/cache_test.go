@@ -122,27 +122,6 @@ func TestCacheStaleFileIsAMiss(t *testing.T) {
 	}
 }
 
-func TestCacheDisabledSkipsReadAndWrite(t *testing.T) {
-	withTempCache(t)
-	if err := Save("iTerm.app", fullColors()); err != nil {
-		t.Fatalf("Save() = %v", err)
-	}
-	t.Setenv("HINTS_NO_THEME_CACHE", "1")
-	if _, ok := Load("iTerm.app"); ok {
-		t.Fatal("Load() hit with HINTS_NO_THEME_CACHE set")
-	}
-	if err := Save("ghostty", fullColors()); err != nil {
-		t.Fatalf("Save() = %v, want no error for the no-op", err)
-	}
-	path, ok := cachePath("ghostty")
-	if !ok {
-		t.Fatal("cachePath() refused a plain program name")
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatal("Save() wrote a file with HINTS_NO_THEME_CACHE set")
-	}
-}
-
 func TestCacheKeyCannotEscapeTheCacheDir(t *testing.T) {
 	home := withTempCache(t)
 	dir, err := os.UserCacheDir()

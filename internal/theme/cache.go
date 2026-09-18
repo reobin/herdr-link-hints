@@ -11,16 +11,8 @@ import (
 // cacheTTL bounds how long a saved reply is trusted.
 const cacheTTL = 24 * time.Hour
 
-func cachingDisabled() bool {
-	v := os.Getenv("HINTS_NO_THEME_CACHE")
-	return v != "" && v != "0"
-}
-
 // Load returns colours from an earlier run, else a miss.
 func Load(program string) (Colors, bool) {
-	if cachingDisabled() {
-		return Colors{}, false
-	}
 	path, ok := cachePath(program)
 	if !ok {
 		return Colors{}, false
@@ -48,9 +40,6 @@ func Load(program string) (Colors, bool) {
 
 // Save remembers a full live reply for the next run.
 func Save(program string, colors Colors) error {
-	if cachingDisabled() {
-		return nil
-	}
 	path, ok := cachePath(program)
 	if !ok {
 		return nil

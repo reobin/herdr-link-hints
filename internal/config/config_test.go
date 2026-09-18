@@ -39,10 +39,9 @@ func TestFocusedPanePrefersTheMostTrustedSource(t *testing.T) {
 
 // Not parallel: these cases set environment variables.
 func TestPaneShape(t *testing.T) {
-	t.Run("the fixed shape holds the readout", func(t *testing.T) {
-		cfg := Load()
-		if cfg.Placement != "popup" || cfg.Width != "14" || cfg.Height != "5" {
-			t.Fatalf("Load() = %+v", cfg)
+	t.Run("the fixed popup holds the readout", func(t *testing.T) {
+		if PopupWidth != "14" || PopupHeight != "5" {
+			t.Fatalf("popup = %sx%s", PopupWidth, PopupHeight)
 		}
 	})
 	t.Run("the fixed width holds the widest readout lines", func(t *testing.T) {
@@ -52,15 +51,6 @@ func TestPaneShape(t *testing.T) {
 			}
 		}
 	})
-	t.Run("the environment overrides the shape", func(t *testing.T) {
-		t.Setenv("HINTS_WIDTH", "40")
-		t.Setenv("HINTS_HEIGHT", "10")
-		t.Setenv("HINTS_PLACEMENT", "overlay")
-		cfg := Load()
-		if cfg.Width != "40" || cfg.Height != "10" || cfg.Placement != "overlay" {
-			t.Fatalf("Load() = %+v", cfg)
-		}
-	})
 }
 
 func TestLoadReadsTheRest(t *testing.T) {
@@ -68,10 +58,9 @@ func TestLoadReadsTheRest(t *testing.T) {
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", "/state")
 	t.Setenv("TERM_PROGRAM", "ghostty")
 	t.Setenv("HINTS_HANDOFF", "/state/handoff-1.json")
-	t.Setenv("HINTS_NO_OBSERVE", "1")
 	cfg := Load()
 	if cfg.Debug != "/tmp/hints.log" || cfg.StateDir != "/state" ||
-		cfg.TermProgram != "ghostty" || cfg.HandoffPath != "/state/handoff-1.json" || !cfg.SkipObserve {
+		cfg.TermProgram != "ghostty" || cfg.HandoffPath != "/state/handoff-1.json" {
 		t.Fatalf("Load() = %+v", cfg)
 	}
 }
