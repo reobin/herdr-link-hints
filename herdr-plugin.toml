@@ -1,6 +1,6 @@
 id = "herdr-link-hints"
 name = "Link Hints"
-version = "1.0.0"
+version = "1.1.0"
 min_herdr_version = "0.9.0"
 description = "Vimium-style keyboard link hints: type a hint code to open a URL from the focused pane."
 platforms = ["linux", "macos"]
