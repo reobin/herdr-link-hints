@@ -99,12 +99,13 @@ func (a *app) prepare(ctx context.Context, env map[string]string) (*marks.Marker
 	return marker, marker != nil
 }
 
-// paneSpec picks the placement. Only a popup floats without reflowing the pane.
+// paneSpec picks the placement. The picker always floats as a popup,
+// which never reflows the pane.
 func (a *app) paneSpec() herdr.PaneOpen {
 	spec := herdr.PaneOpen{
 		Plugin:     pluginID,
 		Entrypoint: entrypoint,
-		Placement:  a.cfg.Placement,
+		Placement:  "popup",
 		Focus:      true,
 		Env:        map[string]string{},
 	}
@@ -112,9 +113,7 @@ func (a *app) paneSpec() herdr.PaneOpen {
 	if a.cfg.Debug != "" {
 		spec.Env["HINTS_DEBUG"] = a.cfg.Debug
 	}
-	if spec.Placement == "popup" {
-		spec.Width, spec.Height = a.cfg.Width, a.cfg.Height
-	}
+	spec.Width, spec.Height = config.PopupWidth, config.PopupHeight
 	return spec
 }
 
@@ -224,7 +223,7 @@ func (a *app) gather(ctx context.Context, focused string) handoff.Payload {
 	ids := paneIDs(panes)
 	scrolls := a.scrollsFor(ctx, ids, listed)
 
-	scanner := &scan.Scanner{Source: a.client, Log: a.log, SkipObserve: a.cfg.SkipObserve}
+	scanner := &scan.Scanner{Source: a.client, Log: a.log}
 	scanInput := scanPanes(panes, scrolls)
 	// Cursor at the viewport bottom, where the newest output is.
 	cursors := make(map[string]int, len(scanInput))

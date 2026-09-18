@@ -1,26 +1,24 @@
-// Package config reads every environment variable the plugin honours, so
-// the rest of the code takes its settings as arguments.
+// Package config reads the environment the plugin honours, so the rest
+// of the code takes its settings as arguments.
 package config
 
 import (
 	"encoding/json"
 	"os"
-	"strconv"
 )
 
-// Defaults for the picker popup. The content width fits the widest readout
-// plus padding, and the height centres it; both grow by the border.
+// The picker popup size: content fits the widest readout plus padding,
+// grown by the border.
 const (
 	contentCols = 12
 	contentRows = 3
+	// PopupWidth and PopupHeight are the fixed outer popup size in cells.
+	PopupWidth  = "14"
+	PopupHeight = "5"
 )
 
 // Config is the environment, read once.
 type Config struct {
-	// Only a popup placement takes a size.
-	Placement string
-	Width     string
-	Height    string
 	// Debug is empty, or a file path, or any value meaning stderr.
 	Debug    string
 	StateDir string
@@ -28,7 +26,6 @@ type Config struct {
 	TermProgram string
 	// HandoffPath is set by the action process on the picker's environment.
 	HandoffPath string
-	SkipObserve bool
 
 	panes []PaneSource
 }
@@ -47,14 +44,10 @@ func Load() Config {
 		_ = json.Unmarshal([]byte(raw), &pluginContext)
 	}
 	return Config{
-		Placement:   envOr("HINTS_PLACEMENT", "popup"),
-		Width:       envOr("HINTS_WIDTH", strconv.Itoa(contentCols+2)),
-		Height:      envOr("HINTS_HEIGHT", strconv.Itoa(contentRows+2)),
 		Debug:       os.Getenv("HINTS_DEBUG"),
 		StateDir:    os.Getenv("HERDR_PLUGIN_STATE_DIR"),
 		TermProgram: os.Getenv("TERM_PROGRAM"),
 		HandoffPath: os.Getenv("HINTS_HANDOFF"),
-		SkipObserve: os.Getenv("HINTS_NO_OBSERVE") != "",
 		panes: []PaneSource{
 			{"HERDR_ACTIVE_PANE_ID", os.Getenv("HERDR_ACTIVE_PANE_ID")},
 			{"HERDR_PANE_ID", os.Getenv("HERDR_PANE_ID")},
@@ -74,11 +67,4 @@ func (c Config) FocusedPane() (pane, source string) {
 		}
 	}
 	return "", "none"
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
