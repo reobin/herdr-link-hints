@@ -78,8 +78,8 @@ func TestTarget(t *testing.T) {
 func TestItemsFor(t *testing.T) {
 	t.Parallel()
 	found := []links.Link{
-		{URL: "https://a.io/x", Text: "https://a.io/x", Context: "see https://a.io/x for more", Row: 2, Col: 4, Pane: "w1:p1"},
-		{URL: "https://b.io/y", Text: "#232", Context: "#232 fixes it", Row: 5, Col: 0, Pane: "w1:p2"},
+		{URL: "https://a.io/x", Text: "https://a.io/x", Row: 2, Col: 4, Pane: "w1:p1"},
+		{URL: "https://b.io/y", Text: "#232", Row: 5, Col: 0, Pane: "w1:p2"},
 	}
 
 	codes := []string{"a", "s"}
@@ -539,8 +539,5 @@ func TestGatherRanksLinksForTheList(t *testing.T) {
 	found := a.gather(context.Background(), "w1:p1").Found
 	if len(found) != 2 || found[0].URL != "https://a.io/x" || found[0].Row != 2 {
 		t.Fatalf("gather().Found = %+v, want the nearest occurrence of each URL first", found)
-	}
-	if found[0].Context == "" {
-		t.Fatalf("gather().Found[0] = %+v, want the surrounding text carried", found[0])
 	}
 }

@@ -250,34 +250,6 @@ func TestMerge(t *testing.T) {
 	})
 }
 
-func TestMergeCountsBlanksBeforeALink(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		line string
-		col  int
-		want int
-	}{
-		{"room in the gutter", "see    https://a.io/x", 7, 4},
-		{"flush against a word", "(https://a.io/x)", 1, 0},
-		{"start of the line", "https://a.io/x", 0, 0},
-		{"wide characters do not count as blanks", "\u65e5\u672c https://a.io/x", 5, 1},
-		{"past the end of the text", "ab", 6, 4},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := Merge([]string{tc.line}, []Visible{{Match: "https://a.io/x", Row: 0, Col: tc.col}}, nil)
-			if len(got) != 1 {
-				t.Fatalf("Merge() = %+v", got)
-			}
-			if got[0].Before != tc.want {
-				t.Fatalf("Before = %d, want %d", got[0].Before, tc.want)
-			}
-		})
-	}
-}
-
 // A column is a screen cell, not a byte offset: a byte offset lands far to
 // the right on any line with wide text.
 func TestFromLinesReportsDisplayColumns(t *testing.T) {

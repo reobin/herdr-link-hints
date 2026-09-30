@@ -3,6 +3,7 @@ package ui
 import (
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/reobin/herdr-link-hints/internal/cells"
 )
@@ -236,7 +237,7 @@ func footerHelp(short bool) line {
 // edge so it reads without colour support.
 func (l layout) itemLine(item Item, selected bool) line {
 	room := l.width - 2*l.pad - l.code - len(gap)
-	url := truncate(item.URL, room)
+	url := truncate(sanitize(item.URL), room)
 	out := append(l.indent(), segment{text: padRight(item.Code, l.code), sgr: "1"})
 	if url != "" {
 		out = append(out, segment{text: gap + url})
@@ -293,6 +294,18 @@ func (l layout) spread(left, right line) line {
 
 func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", max(width-cells.Width(s), 0))
+}
+
+// sanitize drops control runes so an untrusted OSC 8 target cannot move
+// the cursor or split rows. Measurement already counts them as zero
+// width, but the terminal would still interpret them.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // truncate shortens to whole cells, marking the cut.

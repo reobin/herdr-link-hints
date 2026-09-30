@@ -22,14 +22,10 @@ const (
 type Link struct {
 	URL  string // ready to open
 	Text string // as shown
-	// Context is the trimmed source line the link was read from.
-	Context string
-	Kind    Kind
-	Row     int // 0-based viewport row
-	Col     int // display column
-	Pane    string
-	// Before is blank cells left of the link.
-	Before int
+	Kind Kind
+	Row  int // 0-based viewport row
+	Col  int // display column
+	Pane string
 }
 
 // Visible is a URL as shown, for re-finding after scroll.
@@ -293,8 +289,6 @@ func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 			return
 		}
 		taken[at] = true
-		link.Before = blanksBefore(lines, link.Row, link.Col)
-		link.Context = contextLine(lines, link.Row)
 		out = append(out, link)
 	}
 	var fallback []ansi.Link
@@ -403,36 +397,6 @@ func byteAt(line string, col int) int {
 		return len(line)
 	}
 	return -1
-}
-
-// blanksBefore counts empty cells left of a link.
-func blanksBefore(lines []string, row, col int) int {
-	if row < 0 || row >= len(lines) || col <= 0 {
-		return 0
-	}
-	blanks, column := 0, 0
-	for _, r := range lines[row] {
-		if column >= col {
-			break
-		}
-		if r == ' ' {
-			blanks++
-		} else {
-			blanks = 0
-		}
-		column += cells.Width(string(r))
-	}
-	// A link past the end of the text has nothing but blanks before it.
-	return blanks + max(col-column, 0)
-}
-
-// contextLine is the trimmed source line behind a link, blank when the
-// row is out of range.
-func contextLine(lines []string, row int) string {
-	if row < 0 || row >= len(lines) {
-		return ""
-	}
-	return strings.TrimSpace(lines[row])
 }
 
 // Uniq keeps the first link per URL, so a repeated link lists once.

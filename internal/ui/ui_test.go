@@ -273,6 +273,26 @@ func TestRenderListTruncatesToThePopup(t *testing.T) {
 	}
 }
 
+// An untrusted OSC 8 target must not split rows or move the cursor.
+func TestRenderListSanitizesControlCharacters(t *testing.T) {
+	t.Parallel()
+	if got := sanitize("https://x.io/a\r\n\x1bb"); got != "https://x.io/ab" {
+		t.Fatalf("sanitize() = %q, want controls dropped", got)
+	}
+	term, out := keyTerminal(t, nil)
+	term.rows, term.cols = 5, 40
+	bad := Item{Code: "a", URL: "https://x.io/a\r\nb"}
+	term.renderList([]Item{bad}, []int{0}, 0, "")
+	term.Flush()
+	rows := strings.Split(stripSGR(out.String()), "\r\n")
+	if len(rows) != term.rows {
+		t.Fatalf("render split into %d rows, want %d: %q", len(rows), term.rows, rows)
+	}
+	if !strings.Contains(rows[1], "https://x.io/ab") {
+		t.Fatalf("sanitized URL missing, got:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
 // The window follows the selection so it never scrolls out of sight.
 func TestWindowKeepsSelectionVisible(t *testing.T) {
 	t.Parallel()
