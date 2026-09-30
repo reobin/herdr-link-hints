@@ -2,14 +2,12 @@ package herdr
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 )
 
@@ -126,83 +124,6 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 		return nil, fmt.Errorf("dial herdr socket %s: %w", c.socket, err)
 	}
 	return conn, nil
-}
-
-// Graphics reports what pane.graphics can do. feature_disabled means no
-// Kitty support: fall back to the list picker.
-type Graphics struct {
-	CellWidthPx  int  `json:"cell_width_px"`
-	CellHeightPx int  `json:"cell_height_px"`
-	PaneVisible  bool `json:"pane_visible"`
-	MaxLayers    int  `json:"max_layers_per_pane"`
-}
-
-func (c *Client) GraphicsInfo(ctx context.Context, pane string) (Graphics, error) {
-	var result Graphics
-	err := c.call(ctx, "pane.graphics.info", map[string]any{"pane_id": pane}, &result)
-	return result, err
-}
-
-// GraphicsInfos fetches every pane concurrently, keeping successes.
-func (c *Client) GraphicsInfos(ctx context.Context, panes []string) map[string]Graphics {
-	infos := make(map[string]Graphics, len(panes))
-	var (
-		mu sync.Mutex
-		wg sync.WaitGroup
-	)
-	for _, pane := range panes {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			info, err := c.GraphicsInfo(ctx, pane)
-			if err != nil {
-				return
-			}
-			mu.Lock()
-			infos[pane] = info
-			mu.Unlock()
-		}()
-	}
-	wg.Wait()
-	return infos
-}
-
-// Frame is one image over viewport cells.
-type Frame struct {
-	Pane   string
-	Layer  string
-	ZIndex int
-	PNG    []byte
-	Width  int // pixels
-	Height int // pixels
-	Row    int // cells
-	Col    int
-	Rows   int
-	Cols   int
-}
-
-func (c *Client) SetGraphics(ctx context.Context, f Frame) error {
-	params := map[string]any{
-		"pane_id":      f.Pane,
-		"layer_id":     f.Layer,
-		"z_index":      f.ZIndex,
-		"format":       "png",
-		"image_width":  f.Width,
-		"image_height": f.Height,
-		"data_base64":  base64.StdEncoding.EncodeToString(f.PNG),
-		"placement": map[string]any{
-			"viewport_row": f.Row,
-			"viewport_col": f.Col,
-			"grid_rows":    f.Rows,
-			"grid_cols":    f.Cols,
-		},
-	}
-	return c.call(ctx, "pane.graphics.set", params, nil)
-}
-
-// ClearGraphics names the layer: omitting it clears only "primary".
-func (c *Client) ClearGraphics(ctx context.Context, pane, layer string) error {
-	return c.call(ctx, "pane.graphics.clear", map[string]any{"pane_id": pane, "layer_id": layer}, nil)
 }
 
 // PaneOpen describes the plugin pane to open. Width and Height are cells or percent.

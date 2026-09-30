@@ -1,14 +1,18 @@
 # herdr-link-hints
 
-Vimium-style keyboard link hints for [herdr](https://herdr.dev).
-Tap a key, get a hint code drawn beside the links on screen, type the
-code to open one.
+Keyboard link hints for [herdr](https://herdr.dev).
+Tap a key, get a popup listing the links on screen, type a code
+or pick a row to open one.
 
-![demo](docs/demo.gif)
+Each row is one link: its hint code and its URL, each URL listed
+once.
+
+Type a code to open its link at once, or move with the arrow keys
+and confirm with Enter.
 
 ## Install
 
-Needs herdr 0.9.0+.
+Needs herdr 0.9.2+.
 
 ```sh
 herdr plugin install reobin/herdr-link-hints

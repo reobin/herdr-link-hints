@@ -22,10 +22,12 @@ const (
 type Link struct {
 	URL  string // ready to open
 	Text string // as shown
-	Kind Kind
-	Row  int // 0-based viewport row
-	Col  int // display column
-	Pane string
+	// Context is the trimmed source line the link was read from.
+	Context string
+	Kind    Kind
+	Row     int // 0-based viewport row
+	Col     int // display column
+	Pane    string
 	// Before is blank cells left of the link.
 	Before int
 }
@@ -292,6 +294,7 @@ func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 		}
 		taken[at] = true
 		link.Before = blanksBefore(lines, link.Row, link.Col)
+		link.Context = contextLine(lines, link.Row)
 		out = append(out, link)
 	}
 	var fallback []ansi.Link
@@ -421,6 +424,31 @@ func blanksBefore(lines []string, row, col int) int {
 	}
 	// A link past the end of the text has nothing but blanks before it.
 	return blanks + max(col-column, 0)
+}
+
+// contextLine is the trimmed source line behind a link, blank when the
+// row is out of range.
+func contextLine(lines []string, row int) string {
+	if row < 0 || row >= len(lines) {
+		return ""
+	}
+	return strings.TrimSpace(lines[row])
+}
+
+// Uniq keeps the first link per URL, so a repeated link lists once.
+// Rank first: the survivor is the best-ranked occurrence, and its cell
+// is the one the picker opens.
+func Uniq(found []Link) []Link {
+	seen := make(map[string]bool, len(found))
+	out := found[:0]
+	for _, link := range found {
+		if seen[link.URL] {
+			continue
+		}
+		seen[link.URL] = true
+		out = append(out, link)
+	}
+	return out
 }
 
 func anchorText(h ansi.Link) string {

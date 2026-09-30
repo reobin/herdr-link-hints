@@ -13,7 +13,6 @@ import (
 
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
-	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
 // EnvVar names the file on the picker pane's environment.
@@ -24,17 +23,10 @@ const ttl = 5 * time.Second
 
 // Payload is the whole scan, already done.
 type Payload struct {
-	Focused   string
-	Panes     []herdr.Pane
-	Scrolls   map[string]herdr.Scroll
-	Infos     map[string]herdr.Graphics
-	Colors    theme.Colors
-	HasColors bool
-	Found     []links.Link
-	// Popup is where the picker popup will sit on the surface.
-	Popup herdr.Rect
-	// Drawn names the frame layers already up, per pane.
-	Drawn   map[string][]string
+	Focused string
+	Panes   []herdr.Pane
+	Scrolls map[string]herdr.Scroll
+	Found   []links.Link
 	WroteAt time.Time
 }
 

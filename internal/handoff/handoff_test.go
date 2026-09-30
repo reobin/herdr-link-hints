@@ -17,14 +17,10 @@ func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 func TestHandoffRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	want := Payload{
-		Focused:   "w1:p1",
-		Panes:     []herdr.Pane{{ID: "w1:p1", Width: 204, Height: 57}},
-		Scrolls:   map[string]herdr.Scroll{"w1:p1": {Offset: 3, ViewportRows: 57}},
-		Infos:     map[string]herdr.Graphics{"w1:p1": {PaneVisible: true, CellWidthPx: 19, CellHeightPx: 54}},
-		HasColors: true,
-		Found:     []links.Link{{URL: "https://a.io/x", Text: "x", Row: 2, Col: 4, Pane: "w1:p1"}},
-		Popup:     herdr.Rect{X: 96, Y: 27, Width: 14, Height: 5},
-		Drawn:     map[string][]string{"w1:p1": {"link-hints", "link-hints-top"}},
+		Focused: "w1:p1",
+		Panes:   []herdr.Pane{{ID: "w1:p1", Width: 204, Height: 57}},
+		Scrolls: map[string]herdr.Scroll{"w1:p1": {Offset: 3, ViewportRows: 57}},
+		Found:   []links.Link{{URL: "https://a.io/x", Text: "x", Row: 2, Col: 4, Pane: "w1:p1"}},
 	}
 
 	path, err := Write(dir, want)
@@ -38,11 +34,8 @@ func TestHandoffRoundTrip(t *testing.T) {
 	if got.Focused != want.Focused || len(got.Found) != 1 || got.Found[0].URL != want.Found[0].URL {
 		t.Fatalf("Read() = %+v, want the payload back", got)
 	}
-	if got.Infos["w1:p1"].CellWidthPx != 19 || got.Scrolls["w1:p1"].Offset != 3 {
+	if got.Scrolls["w1:p1"].Offset != 3 {
 		t.Fatalf("Read() lost pane state: %+v", got)
-	}
-	if got.Popup != want.Popup || len(got.Drawn["w1:p1"]) != 2 {
-		t.Fatalf("Read() lost the popup or the drawn layers: %+v", got)
 	}
 	// Consumed: no second pickup.
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

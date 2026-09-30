@@ -2,7 +2,7 @@ package herdr
 
 import "testing"
 
-// Calibrated against a live 206x59 surface and the default 14x5 popup,
+// Calibrated against a live 206x59 surface and the default 80x20 popup,
 // mirroring Herdr's resolve_popup_geometry.
 func TestPopupRect(t *testing.T) {
 	t.Parallel()
@@ -14,7 +14,7 @@ func TestPopupRect(t *testing.T) {
 		want          Rect
 		ok            bool
 	}{
-		{"default picker size", surface, "14", "5", Rect{X: 96, Y: 27, Width: 14, Height: 5}, true},
+		{"default picker size", surface, "80", "20", Rect{X: 63, Y: 19, Width: 80, Height: 20}, true},
 		{"blank sizes take half the surface", surface, "", "", Rect{X: 51, Y: 15, Width: 103, Height: 29}, true},
 		{"percentages", surface, "50%", "25%", Rect{X: 51, Y: 22, Width: 103, Height: 14}, true},
 		{"too small grows to the minimum", surface, "2", "1", Rect{X: 100, Y: 27, Width: 6, Height: 4}, true},

@@ -529,3 +529,18 @@ func TestMergePrefersAVerifiedReplayCellPastTheCap(t *testing.T) {
 		})
 	}
 }
+
+// A repeated URL lists once: the first occurrence wins, so the survivor
+// keeps the best rank and its cell stays openable.
+func TestUniqKeepsTheFirstOccurrence(t *testing.T) {
+	t.Parallel()
+	found := []Link{
+		{URL: "https://a.io/x", Row: 5, Col: 1},
+		{URL: "https://b.io/y", Row: 2, Col: 0},
+		{URL: "https://a.io/x", Row: 1, Col: 9},
+	}
+	got := Uniq(found)
+	if len(got) != 2 || got[0].Row != 5 || got[1].URL != "https://b.io/y" {
+		t.Fatalf("Uniq() = %+v, want the first of each URL", got)
+	}
+}

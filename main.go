@@ -15,9 +15,6 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/demo"
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/hints"
-	"github.com/reobin/herdr-link-hints/internal/marks"
-	"github.com/reobin/herdr-link-hints/internal/overlay"
-	"github.com/reobin/herdr-link-hints/internal/theme"
 	"github.com/reobin/herdr-link-hints/internal/ui"
 )
 
@@ -56,7 +53,7 @@ func run(args []string) int {
 		defer stop()
 		term := ui.Open(os.Stdin, os.Stdout)
 		defer term.Close()
-		return a.pick(ctx, term, func() theme.Colors { return term.Theme(a.cfg.TermProgram) })
+		return a.pick(ctx, term)
 	default:
 		_, _ = io.WriteString(os.Stderr, "picker: unknown argument "+mode+"\nusage: picker [--open|--demo]\n")
 		return exitFailed
@@ -72,27 +69,14 @@ func start() (context.Context, context.CancelFunc, *app) {
 		cfg:    cfg,
 		log:    log,
 		client: herdr.New(herdr.WithLogger(log)),
-		trail:  marks.OpenTrail(cfg.StateDir),
 	}
 }
 
 func runDemo(term *ui.Terminal) int {
 	found := demo.Ranked()
 	codes := demo.Codes()
-	var renderErr error
-	opts := ui.Options{Alphabet: hints.DefaultAlphabet}
-	opts.OnNarrow = func(matches []int, typed string) {
-		badges := hints.Badges(found, codes, matches, typed)[demo.Pane]
-		if _, err := overlay.Render(demo.Scene(badges)); err != nil {
-			renderErr = err
-		}
-	}
 
-	index, picked := ui.Pick(term, itemsFor(found, codes), opts)
-	if renderErr != nil {
-		term.Printf("\ndemo render failed: %v\n", renderErr)
-		return exitFailed
-	}
+	index, picked := ui.Pick(term, itemsFor(found, codes), ui.Options{Alphabet: hints.DefaultAlphabet})
 	if !picked {
 		return exitCancelled
 	}

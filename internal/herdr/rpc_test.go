@@ -214,51 +214,6 @@ func TestFailedCallRedials(t *testing.T) {
 	}
 }
 
-func TestGraphicsInfos(t *testing.T) {
-	t.Parallel()
-	requests := make(chan map[string]any, 2)
-	socket := fakeServer(t, func(request map[string]any) [][]byte {
-		requests <- request
-		return [][]byte{mustJSON(t, map[string]any{
-			"id":     request["id"],
-			"result": map[string]any{"cell_width_px": 9, "cell_height_px": 20, "pane_visible": true},
-		})}
-	})
-
-	infos := New(WithSocket(socket)).GraphicsInfos(context.Background(), []string{"w1:p1", "w1:p2"})
-	if len(infos) != 2 {
-		t.Fatalf("GraphicsInfos() = %+v, want both panes", infos)
-	}
-	for i := range 2 {
-		request := <-requests
-		if request["method"] != "pane.graphics.info" {
-			t.Fatalf("request %d method = %v", i, request["method"])
-		}
-	}
-}
-
-func TestGraphicsInfosSkipsFailures(t *testing.T) {
-	t.Parallel()
-	socket := fakeServer(t, func(request map[string]any) [][]byte {
-		params, _ := request["params"].(map[string]any)
-		if params["pane_id"] == "w1:p2" {
-			return [][]byte{mustJSON(t, map[string]any{
-				"id":    request["id"],
-				"error": map[string]any{"code": "not_found", "message": "gone"},
-			})}
-		}
-		return [][]byte{mustJSON(t, map[string]any{
-			"id":     request["id"],
-			"result": map[string]any{"cell_width_px": 9, "cell_height_px": 20, "pane_visible": true},
-		})}
-	})
-
-	infos := New(WithSocket(socket)).GraphicsInfos(context.Background(), []string{"w1:p1", "w1:p2"})
-	if len(infos) != 1 || infos["w1:p1"].CellWidthPx != 9 {
-		t.Fatalf("GraphicsInfos() = %+v, want only w1:p1", infos)
-	}
-}
-
 // Encode failures must never reach the dial.
 func TestCallEncodesBeforeDialling(t *testing.T) {
 	t.Parallel()

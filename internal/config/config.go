@@ -7,14 +7,12 @@ import (
 	"os"
 )
 
-// The picker popup size: content fits the widest readout plus padding,
-// grown by the border.
+// The picker popup is one fixed size: it shows a loading state before the
+// list arrives, and resizing between the two would shift the layout.
 const (
-	contentCols = 12
-	contentRows = 3
 	// PopupWidth and PopupHeight are the fixed outer popup size in cells.
-	PopupWidth  = "14"
-	PopupHeight = "5"
+	PopupWidth  = "80"
+	PopupHeight = "20"
 )
 
 // Config is the environment, read once.
@@ -22,8 +20,6 @@ type Config struct {
 	// Debug is empty, or a file path, or any value meaning stderr.
 	Debug    string
 	StateDir string
-	// TermProgram keys the theme cache.
-	TermProgram string
 	// HandoffPath is set by the action process on the picker's environment.
 	HandoffPath string
 
@@ -46,7 +42,6 @@ func Load() Config {
 	return Config{
 		Debug:       os.Getenv("HINTS_DEBUG"),
 		StateDir:    os.Getenv("HERDR_PLUGIN_STATE_DIR"),
-		TermProgram: os.Getenv("TERM_PROGRAM"),
 		HandoffPath: os.Getenv("HINTS_HANDOFF"),
 		panes: []PaneSource{
 			{"HERDR_ACTIVE_PANE_ID", os.Getenv("HERDR_ACTIVE_PANE_ID")},
