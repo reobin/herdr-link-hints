@@ -10,6 +10,8 @@ once.
 Type a code to open its link at once, or move with the arrow keys
 and confirm with Enter.
 
+![demo](docs/demo.gif)
+
 ## Install
 
 Needs herdr 0.9.2+.
