@@ -1,16 +1,12 @@
 package demo
 
 import (
-	"bytes"
-	"image"
-	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/reobin/herdr-link-hints/internal/cells"
-	"github.com/reobin/herdr-link-hints/internal/overlay"
 )
 
 func TestRankedIsDeterministic(t *testing.T) {
@@ -84,58 +80,4 @@ func TestPaneFile(t *testing.T) {
 	if string(got) != want {
 		t.Fatal("pane.txt does not match PaneLines() (run with UPDATE_GOLDEN=1)")
 	}
-}
-
-func TestGolden(t *testing.T) {
-	t.Parallel()
-	for name, scene := range Scenes() {
-		frame, err := overlay.Render(scene)
-		if err != nil {
-			t.Fatalf("%s: Render() error: %v", name, err)
-		}
-		path := filepath.Join("testdata", "golden", name+".png")
-		if os.Getenv("UPDATE_GOLDEN") != "" {
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, frame.PNG, 0o644); err != nil {
-				t.Fatal(err)
-			}
-		}
-		want, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("%s: read golden: %v (run with UPDATE_GOLDEN=1)", name, err)
-		}
-		if !samePixels(decodePNG(t, frame.PNG), decodePNG(t, want)) {
-			t.Fatalf("%s: rendered frame differs from the golden (run with UPDATE_GOLDEN=1)", name)
-		}
-	}
-}
-
-func decodePNG(t *testing.T, data []byte) image.Image {
-	t.Helper()
-	img, err := png.Decode(bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("decode png: %v", err)
-	}
-	return img
-}
-
-// Goldens are compared as pixels: the encoder's deflate output can change
-// between Go releases while the frame does not.
-func samePixels(a, b image.Image) bool {
-	if a.Bounds() != b.Bounds() {
-		return false
-	}
-	r := a.Bounds()
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		for x := r.Min.X; x < r.Max.X; x++ {
-			ar, ag, ab, aa := a.At(x, y).RGBA()
-			br, bg, bb, ba := b.At(x, y).RGBA()
-			if ar != br || ag != bg || ab != bb || aa != ba {
-				return false
-			}
-		}
-	}
-	return true
 }

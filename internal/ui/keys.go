@@ -13,7 +13,9 @@ const (
 	keyEnter
 	keyBackspace
 	keyEscape
-	keyUnknown // recognised but not acted on, such as an arrow
+	keyUp
+	keyDown
+	keyUnknown // recognised but not acted on, such as a modified side arrow
 )
 
 type key struct {
@@ -32,6 +34,10 @@ func (t *Terminal) readKey() key {
 			return t.readEscape()
 		case 0x7f, 0x08:
 			return key{kind: keyBackspace}
+		case 0x10:
+			return key{kind: keyUp}
+		case 0x0e:
+			return key{kind: keyDown}
 		case '\r', '\n':
 			return key{kind: keyEnter}
 		case 0x03, 0x04:
@@ -57,13 +63,29 @@ func (t *Terminal) readEscape() key {
 	if b != '[' && b != 'O' {
 		return key{kind: keyEscape}
 	}
-	// CSI and SS3 run until a final byte in @-~.
+	introducer := b
+	// CSI and SS3 run until a final byte in @-~. Plain arrows move the
+	// selection; anything fancier stays unrecognised.
 	for {
-		b, open := t.nextByte(escapeSequenceWait)
-		if !open || (b >= '@' && b <= '~') {
-			return key{kind: keyUnknown}
+		var ok bool
+		b, ok = t.nextByte(escapeSequenceWait)
+		open = ok
+		if !ok || (b >= '@' && b <= '~') {
+			break
 		}
 	}
+	if !open {
+		return key{kind: keyUnknown}
+	}
+	if introducer == '[' || introducer == 'O' {
+		switch b {
+		case 'A':
+			return key{kind: keyUp}
+		case 'B':
+			return key{kind: keyDown}
+		}
+	}
+	return key{kind: keyUnknown}
 }
 
 // skipOSC swallows a late OSC reply that would read as Esc.

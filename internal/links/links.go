@@ -26,8 +26,6 @@ type Link struct {
 	Row  int // 0-based viewport row
 	Col  int // display column
 	Pane string
-	// Before is blank cells left of the link.
-	Before int
 }
 
 // Visible is a URL as shown, for re-finding after scroll.
@@ -291,7 +289,6 @@ func Merge(lines []string, visible []Visible, hidden []ansi.Link) []Link {
 			return
 		}
 		taken[at] = true
-		link.Before = blanksBefore(lines, link.Row, link.Col)
 		out = append(out, link)
 	}
 	var fallback []ansi.Link
@@ -402,25 +399,20 @@ func byteAt(line string, col int) int {
 	return -1
 }
 
-// blanksBefore counts empty cells left of a link.
-func blanksBefore(lines []string, row, col int) int {
-	if row < 0 || row >= len(lines) || col <= 0 {
-		return 0
-	}
-	blanks, column := 0, 0
-	for _, r := range lines[row] {
-		if column >= col {
-			break
+// Uniq keeps the first link per URL, so a repeated link lists once.
+// Rank first: the survivor is the best-ranked occurrence, and its cell
+// is the one the picker opens.
+func Uniq(found []Link) []Link {
+	seen := make(map[string]bool, len(found))
+	out := found[:0]
+	for _, link := range found {
+		if seen[link.URL] {
+			continue
 		}
-		if r == ' ' {
-			blanks++
-		} else {
-			blanks = 0
-		}
-		column += cells.Width(string(r))
+		seen[link.URL] = true
+		out = append(out, link)
 	}
-	// A link past the end of the text has nothing but blanks before it.
-	return blanks + max(col-column, 0)
+	return out
 }
 
 func anchorText(h ansi.Link) string {

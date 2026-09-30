@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,8 +18,6 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/handoff"
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/links"
-	"github.com/reobin/herdr-link-hints/internal/marks"
-	"github.com/reobin/herdr-link-hints/internal/theme"
 	"github.com/reobin/herdr-link-hints/internal/ui"
 )
 
@@ -81,43 +78,18 @@ func TestTarget(t *testing.T) {
 func TestItemsFor(t *testing.T) {
 	t.Parallel()
 	found := []links.Link{
-		{URL: "https://a.io/x", Text: "https://a.io/x", Row: 2, Pane: "w1:p1"},
-		{URL: "https://b.io/y", Text: "#232", Row: 5, Pane: "w1:p2"},
+		{URL: "https://a.io/x", Text: "https://a.io/x", Row: 2, Col: 4, Pane: "w1:p1"},
+		{URL: "https://b.io/y", Text: "#232", Row: 5, Col: 0, Pane: "w1:p2"},
 	}
 
 	codes := []string{"a", "s"}
 	got := itemsFor(found, codes)
-	if assigned := []string{got[0].Code, got[1].Code}; !reflect.DeepEqual(assigned, codes) {
-		t.Fatalf("itemsFor() codes = %+v", assigned)
+	want := []ui.Item{
+		{Code: "a", URL: "https://a.io/x"},
+		{Code: "s", URL: "https://b.io/y"},
 	}
-}
-
-// Without a layer the pick is a code list.
-func TestNarrowOptsFallsBackToListWithoutALayer(t *testing.T) {
-	t.Parallel()
-	log := slog.New(slog.DiscardHandler)
-	found := []links.Link{{Pane: "w1:p1", Row: 1, Col: 2, Text: "ab"}}
-	codes := []string{"a"}
-	ctx := context.Background()
-
-	if opts := narrowOpts(ctx, nil, found, codes); opts.OnNarrow != nil {
-		t.Fatal("nil marker should leave OnNarrow unset so the pick continues as a list")
-	}
-	dead := marks.New(nil, log, theme.Colors{},
-		[]herdr.Pane{{ID: "w1:p1", Width: 80, Height: 24}},
-		map[string]herdr.Scroll{}, map[string]herdr.Graphics{})
-	if opts := narrowOpts(ctx, dead, found, codes); opts.OnNarrow != nil {
-		t.Fatal("dead marker should leave OnNarrow unset so the pick continues as a list")
-	}
-	live := marks.New(nil, log, theme.Colors{},
-		[]herdr.Pane{{ID: "w1:p1", Width: 80, Height: 24}},
-		map[string]herdr.Scroll{},
-		map[string]herdr.Graphics{"w1:p1": {CellWidthPx: 9, CellHeightPx: 19, PaneVisible: true}})
-	if !live.Live() {
-		t.Fatal("want a live marker for the control case")
-	}
-	if opts := narrowOpts(ctx, live, found, codes); opts.OnNarrow == nil {
-		t.Fatal("live marker should redraw badges on narrow")
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("itemsFor() = %+v, want code and URL only", got)
 	}
 }
 
@@ -153,11 +125,8 @@ type fakeClient struct {
 	scrolls     map[string]herdr.Scroll
 	scrollsErr  error
 	scrollErr   error
-	infos       map[string]herdr.Graphics
 	opened      []herdr.PaneOpen
 	openErr     error
-	set         []string
-	cleared     []string
 	activate    herdr.Activation
 	activateErr error
 }
@@ -197,10 +166,6 @@ func (f *fakeClient) PaneScroll(_ context.Context, pane string) (herdr.Scroll, e
 	return f.scrolls[pane], nil
 }
 
-func (f *fakeClient) GraphicsInfos(context.Context, []string) map[string]herdr.Graphics {
-	return f.infos
-}
-
 func (f *fakeClient) ActivateLink(context.Context, string, int, int) (herdr.Activation, error) {
 	return f.activate, f.activateErr
 }
@@ -215,35 +180,12 @@ func (f *fakeClient) OpenPane(_ context.Context, p herdr.PaneOpen) (string, erro
 	return "w1:p9", nil
 }
 
-func (f *fakeClient) SetGraphics(_ context.Context, frame herdr.Frame) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.set = append(f.set, frame.Layer)
-	return nil
-}
-
-func (f *fakeClient) ClearGraphics(_ context.Context, _, layer string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.cleared = append(f.cleared, layer)
-	return nil
-}
-
-func (f *fakeClient) seen() (set, cleared []string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.set), slices.Clone(f.cleared)
-}
-
 func newFakeClient(lines ...string) *fakeClient {
 	return &fakeClient{
 		lines:   map[string][]string{"w1:p1": lines},
 		area:    herdr.Rect{Width: 80, Height: 24},
 		panes:   []herdr.Pane{{ID: "w1:p1", Width: 80, Height: 24}},
 		scrolls: map[string]herdr.Scroll{"w1:p1": {ViewportRows: 24}},
-		infos: map[string]herdr.Graphics{
-			"w1:p1": {CellWidthPx: 9, CellHeightPx: 19, PaneVisible: true, MaxLayers: 16},
-		},
 	}
 }
 
@@ -252,20 +194,16 @@ func testApp(t *testing.T, f *fakeClient, cfg config.Config) *app {
 	return &app{cfg: cfg, log: slog.New(slog.DiscardHandler), client: f}
 }
 
-// A cold theme cache is the CI case: no drawing, just the handoff.
+// The scan rides the handoff to the picker pane.
 func TestOpenHandsTheScanToThePickerPane(t *testing.T) {
 	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
-	themeEnv(t)
 	f := newFakeClient("see https://a.io/x for more")
 	cfg := config.Load()
-	cfg.StateDir, cfg.TermProgram = t.TempDir(), "test-cold"
+	cfg.StateDir = t.TempDir()
 	a := testApp(t, f, cfg)
 
 	if code := a.open(context.Background()); code != exitOK {
 		t.Fatalf("open() = %d, want %d", code, exitOK)
-	}
-	if set, _ := f.seen(); len(set) != 0 {
-		t.Fatal("a cold theme cache should have left the drawing to the picker pane")
 	}
 	if len(f.opened) != 1 {
 		t.Fatalf("open() asked for %d panes, want 1", len(f.opened))
@@ -283,30 +221,6 @@ func TestOpenHandsTheScanToThePickerPane(t *testing.T) {
 	}
 }
 
-func TestOpenClearsWhatItDrewWhenThePaneWillNotOpen(t *testing.T) {
-	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
-	themeEnv(t)
-	if err := theme.Save("test-open", theme.Fallback()); err != nil {
-		t.Fatal(err)
-	}
-	f := newFakeClient("see https://a.io/x for more")
-	f.openErr = errors.New("no room")
-	cfg := config.Load()
-	cfg.StateDir, cfg.TermProgram = t.TempDir(), "test-open"
-	a := testApp(t, f, cfg)
-
-	if code := a.open(context.Background()); code != exitFailed {
-		t.Fatalf("open() = %d, want %d", code, exitFailed)
-	}
-	set, cleared := f.seen()
-	if len(set) == 0 {
-		t.Fatal("a warm theme cache should have let open() draw before asking for the pane")
-	}
-	if len(cleared) == 0 {
-		t.Fatal("open() left its overlay up after the pane failed to open")
-	}
-}
-
 // Fed a handoff, the picker must not scan again.
 func TestPickOpensTheCodeItIsGiven(t *testing.T) {
 	f := newFakeClient("see https://a.io/x for more")
@@ -315,7 +229,6 @@ func TestPickOpensTheCodeItIsGiven(t *testing.T) {
 	a := testApp(t, f, config.Config{StateDir: dir})
 
 	p := a.gather(context.Background(), "w1:p1")
-	p.Colors, p.HasColors = theme.Fallback(), true
 	path, err := handoff.Write(dir, p)
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +236,7 @@ func TestPickOpensTheCodeItIsGiven(t *testing.T) {
 	a.cfg.HandoffPath = path
 
 	term, out := pipeTerminal(t, "a\n")
-	if code := a.pick(context.Background(), term, theme.Fallback); code != exitOK {
+	if code := a.pick(context.Background(), term); code != exitOK {
 		t.Fatalf("pick() = %d, want %d", code, exitOK)
 	}
 	term.Close()
@@ -339,7 +252,6 @@ func TestPickStopsWhenThereIsNothingToHint(t *testing.T) {
 	a := testApp(t, f, config.Config{StateDir: dir})
 
 	p := a.gather(context.Background(), "w1:p1")
-	p.Colors, p.HasColors = theme.Fallback(), true
 	path, err := handoff.Write(dir, p)
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +259,7 @@ func TestPickStopsWhenThereIsNothingToHint(t *testing.T) {
 	a.cfg.HandoffPath = path
 
 	term, out := pipeTerminal(t, "\n")
-	if code := a.pick(context.Background(), term, theme.Fallback); code != exitCancelled {
+	if code := a.pick(context.Background(), term); code != exitCancelled {
 		t.Fatalf("pick() = %d, want %d", code, exitCancelled)
 	}
 	term.Close()
@@ -365,7 +277,7 @@ func TestPickScansItselfWithoutAHandoff(t *testing.T) {
 	a := testApp(t, f, cfg)
 
 	term, out := pipeTerminal(t, "a\n")
-	if code := a.pick(context.Background(), term, theme.Fallback); code != exitOK {
+	if code := a.pick(context.Background(), term); code != exitOK {
 		t.Fatalf("pick() = %d, want %d", code, exitOK)
 	}
 	term.Close()
@@ -396,14 +308,6 @@ func noPaneEnv(t *testing.T) {
 	t.Setenv("HERDR_ACTIVE_PANE_ID", "")
 	t.Setenv("HERDR_PANE_ID", "")
 	t.Setenv("HERDR_PLUGIN_CONTEXT_JSON", "")
-}
-
-// themeEnv gives a test its own cache directory.
-func themeEnv(t *testing.T) {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 }
 
 func TestPaneSpec(t *testing.T) {
@@ -529,10 +433,7 @@ func TestPrepareStopsWithoutAFocusedPane(t *testing.T) {
 	a := testApp(t, f, cfg)
 
 	env := map[string]string{}
-	marker, drew := a.prepare(context.Background(), env)
-	if marker != nil || drew {
-		t.Fatalf("prepare() = %v/%v, want nothing without a pane", marker, drew)
-	}
+	a.prepare(context.Background(), env)
 	if len(env) != 0 {
 		t.Fatalf("prepare() left %+v on the environment", env)
 	}
@@ -541,7 +442,6 @@ func TestPrepareStopsWithoutAFocusedPane(t *testing.T) {
 // An unwritable state dir is not fatal: the picker rescans for itself.
 func TestPrepareLeavesNoHandoffItCouldNotWrite(t *testing.T) {
 	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
-	themeEnv(t)
 	dir := filepath.Join(t.TempDir(), "state")
 	if err := os.Mkdir(dir, 0o500); err != nil {
 		t.Fatal(err)
@@ -550,13 +450,11 @@ func TestPrepareLeavesNoHandoffItCouldNotWrite(t *testing.T) {
 
 	f := newFakeClient("see https://a.io/x for more")
 	cfg := config.Load()
-	cfg.StateDir, cfg.TermProgram = dir, "test-unwritable"
+	cfg.StateDir = dir
 	a := testApp(t, f, cfg)
 
 	env := map[string]string{}
-	if _, drew := a.prepare(context.Background(), env); drew {
-		t.Fatal("prepare() claimed a drawing it could not have made")
-	}
+	a.prepare(context.Background(), env)
 	if _, ok := env[handoff.EnvVar]; ok {
 		t.Fatalf("prepare() pointed the pane at a handoff it never wrote: %+v", env)
 	}
@@ -570,7 +468,7 @@ func TestPickStopsWhenNothingNamesAPane(t *testing.T) {
 	a := testApp(t, f, cfg)
 
 	term, out := pipeTerminal(t, "a\n")
-	if code := a.pick(context.Background(), term, theme.Fallback); code != exitCancelled {
+	if code := a.pick(context.Background(), term); code != exitCancelled {
 		t.Fatalf("pick() = %d, want %d", code, exitCancelled)
 	}
 	term.Close()
@@ -588,7 +486,7 @@ func TestPickCancelsOnACodeThatMatchesNothing(t *testing.T) {
 	a := testApp(t, f, cfg)
 
 	term, _ := pipeTerminal(t, "zz\n")
-	if code := a.pick(context.Background(), term, theme.Fallback); code != exitCancelled {
+	if code := a.pick(context.Background(), term); code != exitCancelled {
 		t.Fatalf("pick() = %d, want %d", code, exitCancelled)
 	}
 	term.Close()
@@ -604,7 +502,7 @@ func TestPickFailsWhenTheLinkMovedOffScreen(t *testing.T) {
 	a := testApp(t, f, cfg)
 
 	term, out := pipeTerminal(t, "a\n")
-	if code := a.pick(context.Background(), term, theme.Fallback); code != exitFailed {
+	if code := a.pick(context.Background(), term); code != exitFailed {
 		t.Fatalf("pick() = %d, want %d", code, exitFailed)
 	}
 	term.Close()
@@ -623,7 +521,7 @@ func TestPickFailsWhenTheBrowserRefusesTheURL(t *testing.T) {
 	a := testApp(t, f, cfg)
 
 	term, out := pipeTerminal(t, "a\n")
-	if code := a.pick(context.Background(), term, theme.Fallback); code != exitFailed {
+	if code := a.pick(context.Background(), term); code != exitFailed {
 		t.Fatalf("pick() = %d, want %d", code, exitFailed)
 	}
 	term.Close()
@@ -632,12 +530,14 @@ func TestPickFailsWhenTheBrowserRefusesTheURL(t *testing.T) {
 	}
 }
 
-// The popup footprint rides in the handoff, so both processes keep off it.
-func TestGatherCarriesThePopupFootprint(t *testing.T) {
+// The scan ranks what the picker lists: nearest the cursor first, each
+// URL once.
+func TestGatherRanksLinksForTheList(t *testing.T) {
 	t.Parallel()
-	f := newFakeClient("see https://a.io/x for more")
+	f := newFakeClient("see https://a.io/x for more", "then https://b.io/y", "again https://a.io/x")
 	a := testApp(t, f, config.Config{})
-	if got, want := a.gather(context.Background(), "w1:p1").Popup, (herdr.Rect{X: 33, Y: 9, Width: 14, Height: 5}); got != want {
-		t.Fatalf("gather().Popup = %+v, want %+v", got, want)
+	found := a.gather(context.Background(), "w1:p1").Found
+	if len(found) != 2 || found[0].URL != "https://a.io/x" || found[0].Row != 2 {
+		t.Fatalf("gather().Found = %+v, want the nearest occurrence of each URL first", found)
 	}
 }

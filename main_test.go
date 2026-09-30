@@ -93,7 +93,7 @@ func TestStartWiresTheApp(t *testing.T) {
 	if a.cfg.StateDir != dir {
 		t.Fatalf("start() StateDir = %q, want %q", a.cfg.StateDir, dir)
 	}
-	if a.client == nil || a.trail == nil || a.log == nil {
+	if a.client == nil || a.log == nil {
 		t.Fatalf("start() = %+v, want every field wired", a)
 	}
 }

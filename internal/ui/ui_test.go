@@ -3,14 +3,12 @@ package ui
 import (
 	"bufio"
 	"bytes"
-	"image/color"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/reobin/herdr-link-hints/internal/theme"
+	"github.com/reobin/herdr-link-hints/internal/cells"
 )
 
 // keyTerminal drives a Terminal from a fixed byte stream.
@@ -41,6 +39,8 @@ func TestReadKey(t *testing.T) {
 		{"carriage return", []byte("\r"), key{kind: keyEnter}},
 		{"newline", []byte("\n"), key{kind: keyEnter}},
 		{"delete", []byte{0x7f}, key{kind: keyBackspace}},
+		{"ctrl-p moves up", []byte{0x10}, key{kind: keyUp}},
+		{"ctrl-n moves down", []byte{0x0e}, key{kind: keyDown}},
 		{"ctrl-c quits", []byte{0x03}, key{kind: keyEscape}},
 		{"ctrl-d quits", []byte{0x04}, key{kind: keyEscape}},
 		{"lone escape quits", []byte{0x1b}, key{kind: keyEscape}},
@@ -58,10 +58,27 @@ func TestReadKey(t *testing.T) {
 	}
 }
 
-// An arrow key used to read as a bare Esc and close the picker.
-func TestReadKeyEscapeSequences(t *testing.T) {
+// Plain arrows move the selection; anything fancier stays unrecognised.
+func TestReadKeyArrowKeys(t *testing.T) {
 	t.Parallel()
-	for _, sequence := range []string{"\x1b[A", "\x1b[B", "\x1b[1;5C", "\x1bOP", "\x1b[200~"} {
+	arrows := []struct {
+		sequence string
+		want     keyKind
+	}{
+		{"\x1b[A", keyUp},
+		{"\x1b[B", keyDown},
+		{"\x1bOA", keyUp},
+		{"\x1bOB", keyDown},
+		{"\x1b[1;5A", keyUp},
+		{"\x1b[1;5B", keyDown},
+	}
+	for _, tc := range arrows {
+		term, _ := keyTerminal(t, []byte(tc.sequence))
+		if got := term.readKey(); got.kind != tc.want {
+			t.Errorf("ReadKey(%q) = %+v, want %+v", tc.sequence, got, tc.want)
+		}
+	}
+	for _, sequence := range []string{"\x1b[1;5C", "\x1bOP", "\x1b[200~"} {
 		term, _ := keyTerminal(t, []byte(sequence))
 		if got := term.readKey(); got.kind != keyUnknown {
 			t.Errorf("ReadKey(%q) = %+v, want keyUnknown", sequence, got)
@@ -96,7 +113,7 @@ func TestReadKeySlowEscapeIsNotASequence(t *testing.T) {
 func items(codes ...string) []Item {
 	out := make([]Item, len(codes))
 	for i, code := range codes {
-		out[i] = Item{Code: code}
+		out[i] = Item{Code: code, URL: "https://x.io/" + code}
 	}
 	return out
 }
@@ -114,6 +131,10 @@ func TestPick(t *testing.T) {
 		{"backspace edits", "sd\x7fa", 3, true},
 		{"escape quits", "\x1b", 0, false},
 		{"arrow key does not quit", "\x1b[Asa", 3, true},
+		{"down then Enter opens the highlighted row", "\x1b[B\r", 1, true},
+		{"up at the top stays", "\x1b[A\r", 0, true},
+		{"down past the end stays", "\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r", 4, true},
+		{"typing resets the selection to the head", "\x1b[B\x1b[Bs\r", 3, true},
 		{"input running out quits", "s", 0, false},
 		{"keys outside the alphabet are ignored", "zsqa", 3, true},
 	}
@@ -163,57 +184,137 @@ func TestPickByLine(t *testing.T) {
 	}
 }
 
-// The whole readout is this one box: the keys typed, then what still
-// matches. Nothing else on screen repeats it.
-func TestRenderStatusShowsTypedAndCount(t *testing.T) {
+// The list shows the status, one row per match with code and URL, and
+// the key help on the last row with the slack above it. The selection
+// inverts edge to edge.
+func TestRenderListShowsStatusRowsAndHelp(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
-	term.renderStatus(2, "a")
+	term.rows, term.cols = 10, 60
+	term.renderList(items("a", "s"), []int{0, 1}, 1, "")
 	term.Flush()
-	rows := drawnRows(out.String())
-	if len(rows) != 2 {
-		t.Fatalf("want the echo and the count on their own rows, got %q", rows)
-	}
-	if rows[0] != "a" {
-		t.Fatalf("first row = %q, want the typed prefix", rows[0])
-	}
-	if rows[1] != "2 links" {
-		t.Fatalf("second row = %q, want the match count", rows[1])
-	}
 
-	// Before the first keystroke the echo row is blank, and the count has
-	// not moved.
-	term, out = keyTerminal(t, nil)
-	term.renderStatus(3, "")
-	term.Flush()
-	if rows := drawnRows(out.String()); len(rows) != 1 || rows[0] != "3 links" {
-		t.Fatalf("untyped pane = %q, want the count alone", rows)
+	text := stripSGR(out.String())
+	rows := strings.Split(text, "\r\n")
+	want := []string{
+		" 2 links",
+		"",
+		" a  https://x.io/a",
+		" s  https://x.io/s" + strings.Repeat(" ", 42),
+		"", "", "", "", "",
+		" ↑↓ move   enter open   esc quit",
 	}
-	if before, after := countRow(out.String()), countRow(typedOut(t)); before != after {
-		t.Fatalf("the count moved from row %d to %d when typing started", before, after)
+	if !slices.Equal(rows, want) {
+		t.Fatalf("rendered list:\n%s\nwant:\n%s", text, strings.Join(want, "\r\n"))
+	}
+	selected := strings.Split(out.String(), "\r\n")[3]
+	if !strings.HasPrefix(selected, "\x1b[7m") || strings.Contains(selected, "\x1b[2m") || strings.Contains(selected, "\x1b[0m ") {
+		t.Fatalf("selected row is not inverted edge to edge:\n%q", selected)
 	}
 }
 
-func TestRenderStatusSaysWhenNothingMatches(t *testing.T) {
+// The status says how much of the list a typed prefix keeps.
+func TestRenderListCountsTheNarrowedList(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
-	term.renderStatus(0, "z")
+	term.rows, term.cols = 6, 40
+	term.renderList(items("aa", "as", "ad", "sa", "ss", "sd"), []int{0, 1, 2}, 0, "a")
 	term.Flush()
-	if rows := drawnRows(out.String()); rows[1] != "no match" {
-		t.Fatalf("second row = %q, want no match", rows[1])
+	if text := stripSGR(out.String()); !strings.Contains(text, "3 of 6") {
+		t.Fatalf("rendered list has no count:\n%s", text)
 	}
 }
 
-func drawnRows(out string) []string {
-	var rows []string
-	for _, row := range strings.Split(strings.TrimPrefix(out, "\x1b[2J\x1b[H"), "\r\n") {
-		if trimmed := strings.TrimSpace(stripSGR(row)); trimmed != "" {
-			rows = append(rows, trimmed)
+// A clamped popup drops the side padding, shortens the help, and keeps
+// the code when the URL cannot fit.
+func TestRenderListAdaptsToASmallPopup(t *testing.T) {
+	t.Parallel()
+	term, out := keyTerminal(t, nil)
+	term.rows, term.cols = 3, 20
+	term.renderList(items("a"), []int{0}, 0, "")
+	term.Flush()
+	rows := strings.Split(stripSGR(out.String()), "\r\n")
+	want := []string{"1 link", "a  https://x.io/a" + strings.Repeat(" ", 3), "↑↓   enter   esc"}
+	if !slices.Equal(rows, want) {
+		t.Fatalf("rows = %q, want %q", rows, want)
+	}
+}
+
+// Nothing matching is a readout, not a crash: the count goes to zero
+// and the list names the prefix.
+func TestRenderListSaysWhenNothingMatches(t *testing.T) {
+	t.Parallel()
+	term, out := keyTerminal(t, nil)
+	term.renderList(items("a"), nil, 0, "z")
+	term.Flush()
+	text := stripSGR(out.String())
+	for _, want := range []string{"0 of 1", "no link starts with z"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("rendered list has no %q:\n%s", want, text)
 		}
 	}
-	return rows
 }
 
+// Long URLs fit the popup, marked where they are cut.
+func TestRenderListTruncatesToThePopup(t *testing.T) {
+	t.Parallel()
+	term, out := keyTerminal(t, nil)
+	term.rows, term.cols = 5, 30
+	long := Item{Code: "a", URL: "https://x.io/a-very-long-path-here"}
+	term.renderList([]Item{long}, []int{0}, 0, "")
+	term.Flush()
+	for _, row := range strings.Split(stripSGR(out.String()), "\r\n") {
+		if cells.Width(strings.TrimSpace(row)) > 30 {
+			t.Fatalf("row over the popup width: %q", row)
+		}
+	}
+	if text := stripSGR(out.String()); !strings.Contains(text, "https://x.io/a-very") {
+		t.Fatalf("URL was cut short:\n%s", text)
+	}
+}
+
+// An untrusted OSC 8 target must not split rows or move the cursor.
+func TestRenderListSanitizesControlCharacters(t *testing.T) {
+	t.Parallel()
+	if got := sanitize("https://x.io/a\r\n\x1bb"); got != "https://x.io/ab" {
+		t.Fatalf("sanitize() = %q, want controls dropped", got)
+	}
+	term, out := keyTerminal(t, nil)
+	term.rows, term.cols = 5, 40
+	bad := Item{Code: "a", URL: "https://x.io/a\r\nb"}
+	term.renderList([]Item{bad}, []int{0}, 0, "")
+	term.Flush()
+	rows := strings.Split(stripSGR(out.String()), "\r\n")
+	if len(rows) != term.rows {
+		t.Fatalf("render split into %d rows, want %d: %q", len(rows), term.rows, rows)
+	}
+	if !strings.Contains(rows[1], "https://x.io/ab") {
+		t.Fatalf("sanitized URL missing, got:\n%s", strings.Join(rows, "\n"))
+	}
+}
+
+// The window follows the selection so it never scrolls out of sight.
+func TestWindowKeepsSelectionVisible(t *testing.T) {
+	t.Parallel()
+	matches := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	if got := window(matches, 0, 4); !slices.Equal(got, []int{0, 1, 2, 3}) {
+		t.Fatalf("window() = %v", got)
+	}
+	if got := window(matches, 9, 4); !slices.Equal(got, []int{6, 7, 8, 9}) {
+		t.Fatalf("window() = %v", got)
+	}
+	if got := window(matches, 5, 4); len(got) != 4 || !slices.Contains(got, 5) {
+		t.Fatalf("window() = %v, want the selection on screen", got)
+	}
+	if got := window(matches, 0, 99); !slices.Equal(got, matches) {
+		t.Fatalf("window() = %v, want every match", got)
+	}
+	if got := window(nil, 0, 4); len(got) != 0 {
+		t.Fatalf("window() = %v, want nothing", got)
+	}
+}
+
+// stripSGR drops every CSI sequence, the clear as well as the styling.
 func stripSGR(s string) string {
 	var b strings.Builder
 	for {
@@ -222,7 +323,8 @@ func stripSGR(s string) string {
 		if !found {
 			return b.String()
 		}
-		_, s, _ = strings.Cut(rest, "m")
+		end := strings.IndexFunc(rest, func(r rune) bool { return r >= '@' && r <= '~' })
+		s = rest[end+1:]
 	}
 }
 
@@ -239,117 +341,6 @@ func TestOpenHidesTheCursor(t *testing.T) {
 	}
 	if !strings.HasSuffix(text, "\x1b[?25h") {
 		t.Fatalf("cursor was never put back: %q", text)
-	}
-}
-
-// OnNarrow skips the resolving keystroke.
-func TestPickReportsEachNarrowing(t *testing.T) {
-	t.Parallel()
-	var typed []string
-	var counts []int
-	term, _ := keyTerminal(t, []byte("sa"))
-	opts := Options{
-		Alphabet: "asdfghjkl",
-		OnNarrow: func(matches []int, prefix string) {
-			typed = append(typed, prefix)
-			counts = append(counts, len(matches))
-		},
-	}
-	if _, ok := Pick(term, items("aa", "as", "ad", "sa", "ss"), opts); !ok {
-		t.Fatal("Pick() did not select")
-	}
-	if want := []string{"", "s"}; !slices.Equal(typed, want) {
-		t.Fatalf("OnNarrow saw %q, want %q", typed, want)
-	}
-	if want := []int{5, 2}; !slices.Equal(counts, want) {
-		t.Fatalf("OnNarrow saw match counts %v, want %v", counts, want)
-	}
-}
-
-func TestPickReportsNarrowingWithoutATerminal(t *testing.T) {
-	t.Parallel()
-	seen := 0
-	term, _ := lineTerminal("ad\n")
-	opts := Options{Alphabet: "asdfghjkl", OnNarrow: func([]int, string) { seen++ }}
-	if _, ok := Pick(term, items("aa", "as", "ad"), opts); !ok {
-		t.Fatal("Pick() did not select")
-	}
-	if seen != 1 {
-		t.Fatalf("OnNarrow ran %d times, want 1", seen)
-	}
-}
-
-// Not parallel: Theme caches under HOME, so each test gets a fresh one.
-func themeEnv(t *testing.T) {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
-}
-
-// A picker that cannot ask for the terminal's palette has to say so rather
-// than guess.
-func TestThemeReadsTheTerminalsColours(t *testing.T) {
-	themeEnv(t)
-	replies := "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" +
-		"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\" +
-		"\x1b]4;1;rgb:dcdc/3232/2f2f\x1b\\" +
-		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\" +
-		"\x1b]4;4;rgb:2626/8b8b/d2d2\x1b\\"
-	term, out := keyTerminal(t, []byte(replies))
-
-	got := term.Theme("test-live-read")
-	if got.Foreground != (color.RGBA{R: 0xCD, G: 0xD6, B: 0xF4, A: 0xFF}) {
-		t.Fatalf("Foreground = %+v", got.Foreground)
-	}
-	if got.Background != (color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF}) {
-		t.Fatalf("Background = %+v", got.Background)
-	}
-	if got.AccentRed != (color.RGBA{R: 0xDC, G: 0x32, B: 0x2F, A: 0xFF}) {
-		t.Fatalf("AccentRed = %+v", got.AccentRed)
-	}
-	if got.Accent != (color.RGBA{R: 0xF9, G: 0xE2, B: 0xAF, A: 0xFF}) {
-		t.Fatalf("Accent = %+v", got.Accent)
-	}
-	if got.AccentBlue != (color.RGBA{R: 0x26, G: 0x8B, B: 0xD2, A: 0xFF}) {
-		t.Fatalf("AccentBlue = %+v", got.AccentBlue)
-	}
-	term.Flush()
-	for _, key := range theme.Keys {
-		if !strings.Contains(out.String(), theme.Query(key)) {
-			t.Fatalf("colour %q was never asked for: %q", key, out.String())
-		}
-	}
-}
-
-func TestThemeFallsBackWhenTheTerminalStaysQuiet(t *testing.T) {
-	themeEnv(t)
-	term, _ := keyTerminal(t, nil)
-	if got := term.Theme("test-quiet"); got != theme.Fallback() {
-		t.Fatalf("Theme() = %+v, want the fallback", got)
-	}
-	line, _ := lineTerminal("")
-	if got := line.Theme("test-quiet"); got != theme.Fallback() {
-		t.Fatalf("Theme() on a pipe = %+v, want the fallback", got)
-	}
-}
-
-// A terminal that answers only some queries keeps the rest at fallback.
-func TestThemeKeepsWhatDidArrive(t *testing.T) {
-	themeEnv(t)
-	term, _ := keyTerminal(t, []byte("\x1b]11;rgb:1e/1e/2e\a"))
-	got := term.Theme("test-partial")
-	if got.Background != (color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF}) {
-		t.Fatalf("Background = %+v", got.Background)
-	}
-	if got.Accent != theme.Fallback().Accent {
-		t.Fatalf("Accent = %+v, want the fallback", got.Accent)
-	}
-	if got.AccentRed != theme.Fallback().AccentRed || got.AccentBlue != theme.Fallback().AccentBlue {
-		t.Fatalf("alternates = %+v, %+v, want the fallback", got.AccentRed, got.AccentBlue)
-	}
-	if _, ok := theme.Load("test-partial"); ok {
-		t.Fatal("Theme() saved a partial reply")
 	}
 }
 
@@ -388,8 +379,7 @@ func TestSpinOnAPipeSaysItOnce(t *testing.T) {
 	}
 }
 
-// A colour reply that misses the theme deadline used to close the picker
-// and then type its payload.
+// A late OSC reply arriving as input must not type its payload.
 func TestReadKeySwallowsALateColorReply(t *testing.T) {
 	t.Parallel()
 	for _, sequence := range []string{
@@ -419,65 +409,6 @@ func TestSpinnerTextDropsALabelThatCannotFit(t *testing.T) {
 	}
 }
 
-// A terminal that answered before is not asked again: the cached reply
-// comes back with nothing written to it.
-func TestThemeUsesTheCache(t *testing.T) {
-	themeEnv(t)
-	want := theme.Colors{
-		Foreground: color.RGBA{R: 0xCD, G: 0xD6, B: 0xF4, A: 0xFF},
-		Background: color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF},
-		AccentRed:  color.RGBA{R: 0xDC, G: 0x32, B: 0x2F, A: 0xFF},
-		Accent:     color.RGBA{R: 0xF9, G: 0xE2, B: 0xAF, A: 0xFF},
-		AccentBlue: color.RGBA{R: 0x26, G: 0x8B, B: 0xD2, A: 0xFF},
-	}
-	if err := theme.Save("test-cached", want); err != nil {
-		t.Fatal(err)
-	}
-	term, out := keyTerminal(t, nil)
-	if got := term.Theme("test-cached"); got != want {
-		t.Fatalf("Theme() = %+v, want the cached colours", got)
-	}
-	term.Flush()
-	if out.Len() != 0 {
-		t.Fatalf("Theme() asked the terminal: %q", out.String())
-	}
-}
-
-// A full live reply is remembered for the next run; a partial one is not.
-func TestThemeSavesAFullReply(t *testing.T) {
-	themeEnv(t)
-	replies := "\x1b]10;rgb:cdcd/d6d6/f4f4\x1b\\" +
-		"\x1b]11;rgb:1e1e/1e1e/2e2e\x1b\\" +
-		"\x1b]4;1;rgb:dcdc/3232/2f2f\x1b\\" +
-		"\x1b]4;3;rgb:f9f9/e2e2/afaf\x1b\\" +
-		"\x1b]4;4;rgb:2626/8b8b/d2d2\x1b\\"
-	term, _ := keyTerminal(t, []byte(replies))
-	got := term.Theme("test-live")
-	if _, ok := theme.Load("test-live"); !ok {
-		t.Fatal("Theme() did not save the full reply")
-	}
-	if got.Background != (color.RGBA{R: 0x1E, G: 0x1E, B: 0x2E, A: 0xFF}) {
-		t.Fatalf("Theme() = %+v", got)
-	}
-}
-
-func typedOut(t *testing.T) string {
-	t.Helper()
-	term, out := keyTerminal(t, nil)
-	term.renderStatus(2, "a")
-	term.Flush()
-	return out.String()
-}
-
-func countRow(out string) int {
-	for i, row := range strings.Split(strings.TrimPrefix(out, "\x1b[2J\x1b[H"), "\r\n") {
-		if strings.Contains(stripSGR(row), "link") {
-			return i
-		}
-	}
-	return -1
-}
-
 // The wider gap falls on the right, so the left edge stays put.
 func TestCentrePadRoundsUp(t *testing.T) {
 	t.Parallel()
@@ -489,21 +420,6 @@ func TestCentrePadRoundsUp(t *testing.T) {
 	for _, tc := range cases {
 		if got := centrePad(tc.width, tc.text); got != tc.want {
 			t.Fatalf("centrePad(%d, %d) = %d, want %d", tc.width, tc.text, got, tc.want)
-		}
-	}
-}
-
-// The count is the line the eye goes to, so it takes the middle row and the
-// echo sits above it.
-func TestStatusPutsTheCountOnTheMiddleRow(t *testing.T) {
-	t.Parallel()
-	for _, rows := range []int{3, 5, 7} {
-		term, out := keyTerminal(t, nil)
-		term.rows = rows
-		term.renderStatus(3, "")
-		term.Flush()
-		if got, want := countRow(out.String()), rows/2; got != want {
-			t.Fatalf("in %d rows the count is on row %d, want the middle row %d", rows, got, want)
 		}
 	}
 }

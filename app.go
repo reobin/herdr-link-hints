@@ -11,10 +11,7 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/herdr"
 	"github.com/reobin/herdr-link-hints/internal/hints"
 	"github.com/reobin/herdr-link-hints/internal/links"
-	"github.com/reobin/herdr-link-hints/internal/marks"
-	"github.com/reobin/herdr-link-hints/internal/overlay"
 	"github.com/reobin/herdr-link-hints/internal/scan"
-	"github.com/reobin/herdr-link-hints/internal/theme"
 	"github.com/reobin/herdr-link-hints/internal/ui"
 )
 
@@ -22,40 +19,27 @@ import (
 // tests supply a fake.
 type client interface {
 	scan.Source
-	marks.Painter
 	ScreenPanes(ctx context.Context, pane string) (herdr.Layout, error)
 	PaneScrolls(ctx context.Context) (map[string]herdr.Scroll, error)
 	PaneScroll(ctx context.Context, pane string) (herdr.Scroll, error)
-	GraphicsInfos(ctx context.Context, panes []string) map[string]herdr.Graphics
 	ActivateLink(ctx context.Context, pane string, row, col int) (herdr.Activation, error)
 	OpenPane(ctx context.Context, p herdr.PaneOpen) (string, error)
 }
-
-// themer is the colour source, so a test can answer without a tty.
-type themer func() theme.Colors
 
 // app carries what both flows need, injected rather than read from the environment.
 type app struct {
 	cfg    config.Config
 	log    *slog.Logger
 	client client
-	trail  *marks.Trail
 }
 
-// open scans and draws before asking for the picker pane.
+// open scans and hands the result to the picker pane.
 func (a *app) open(ctx context.Context) int {
-	// Before the draw, never beside it: reclaiming clears the same layer
-	// IDs on the same panes that prepare is about to set.
-	marks.Reclaim(ctx, a.client, a.log, a.cfg.StateDir)
 	spec := a.paneSpec()
-	marker, drew := a.prepare(ctx, spec.Env)
+	a.prepare(ctx, spec.Env)
 	pane, err := a.client.OpenPane(ctx, spec)
 	if err != nil {
 		a.log.Debug("open picker pane failed", "placement", spec.Placement, "error", err)
-		// No picker is coming to clear it.
-		if drew {
-			marker.Clear(context.WithoutCancel(ctx))
-		}
 		return exitFailed
 	}
 	attrs := []any{"placement", spec.Placement, "width", spec.Width, "height", spec.Height}
@@ -66,37 +50,21 @@ func (a *app) open(ctx context.Context) int {
 	return exitOK
 }
 
-// prepare scans, draws, and leaves the result for the picker pane.
+// prepare scans and leaves the result for the picker pane.
 // Failures fall back to scanning in the picker.
-func (a *app) prepare(ctx context.Context, env map[string]string) (*marks.Marker, bool) {
+func (a *app) prepare(ctx context.Context, env map[string]string) {
 	focused := a.focusedPane()
 	if focused == "" {
-		return nil, false
+		return
 	}
 	p := a.gather(ctx, focused)
-
-	// No tty here, so read the theme cache directly.
-	colors, cached := theme.Load(a.cfg.TermProgram)
-	p.Colors, p.HasColors = colors, cached
-
-	var marker *marks.Marker
-	if cached {
-		marker = a.marker(colors, p)
-		if marker.Live() {
-			marker.Draw(ctx, firstBadges(p.Found, hints.Codes(len(p.Found), hints.DefaultAlphabet)))
-			p.Drawn = marker.Drawn()
-		}
-	} else {
-		a.log.Debug("theme cache miss, leaving the drawing to the picker pane")
-	}
 
 	path, err := handoff.Write(a.cfg.StateDir, p)
 	if err != nil {
 		a.log.Debug("handoff not written, the picker will scan for itself", "error", err)
-		return marker, marker != nil
+		return
 	}
 	env[handoff.EnvVar] = path
-	return marker, marker != nil
 }
 
 // paneSpec picks the placement. The picker always floats as a popup,
@@ -117,7 +85,7 @@ func (a *app) paneSpec() herdr.PaneOpen {
 	return spec
 }
 
-func (a *app) pick(ctx context.Context, term *ui.Terminal, colors themer) int {
+func (a *app) pick(ctx context.Context, term *ui.Terminal) int {
 	rows, cols := term.Size()
 	a.log.Debug("picker pane", "rows", rows, "cols", cols)
 
@@ -135,27 +103,14 @@ func (a *app) pick(ctx context.Context, term *ui.Terminal, colors themer) int {
 	}
 	a.log.Debug("picker input", "pane", p.Focused, "links", len(p.Found), "from_action", handed)
 
-	if !p.HasColors {
-		p.Colors = colors()
-	}
 	found := p.Found
-
-	codes := hints.Codes(len(found), hints.DefaultAlphabet)
-	marker := a.marker(p.Colors, p)
-	defer marker.Clear(context.WithoutCancel(ctx))
-	// Keep the action frame; don't re-encode it.
-	marker.Adopt(p.Drawn, firstBadges(found, codes))
-	// Prime the backdrop while the user reads.
-	if marker.Live() && len(found) > 0 {
-		go marker.Prime(ctx, firstBadges(found, codes))
-	}
 	if len(found) == 0 {
-		marker.Clear(ctx)
 		term.Pause("no links")
 		return exitCancelled
 	}
 
-	index, picked := ui.Pick(term, itemsFor(found, codes), narrowOpts(ctx, marker, found, codes))
+	codes := hints.Codes(len(found), hints.DefaultAlphabet)
+	index, picked := ui.Pick(term, itemsFor(found, codes), ui.Options{Alphabet: hints.DefaultAlphabet})
 	if !picked {
 		return exitCancelled
 	}
@@ -167,8 +122,6 @@ func (a *app) pick(ctx context.Context, term *ui.Terminal, colors themer) int {
 		term.Pause("scrolled")
 		return exitFailed
 	}
-	// Clear before opening.
-	marker.Clear(ctx)
 
 	url, handled := a.activate(ctx, choice, row, col)
 	if handled {
@@ -182,21 +135,6 @@ func (a *app) pick(ctx context.Context, term *ui.Terminal, colors themer) int {
 	}
 	term.Printf("\nOpened %s in browser.\n", url)
 	return exitOK
-}
-
-// marker draws on the scanned panes, keeping clear of where the popup goes.
-func (a *app) marker(colors theme.Colors, p handoff.Payload) *marks.Marker {
-	return marks.New(a.client, a.log, colors, p.Panes, p.Scrolls, p.Infos,
-		marks.WithTrail(a.trail), marks.WithPopup(p.Popup))
-}
-
-// popupRect is where the picker popup will sit, zero when it cannot open.
-func popupRect(area herdr.Rect) herdr.Rect {
-	rect, ok := herdr.PopupRect(area, config.PopupWidth, config.PopupHeight)
-	if !ok {
-		return herdr.Rect{}
-	}
-	return rect
 }
 
 // focusedPane takes the first source that named a pane.
@@ -240,37 +178,30 @@ func (a *app) gather(ctx context.Context, focused string) handoff.Payload {
 	scrolls := a.scrollsFor(ctx, ids, listed)
 
 	scanner := &scan.Scanner{Source: a.client, Log: a.log}
-	scanInput := scanPanes(panes, scrolls)
-	// Cursor at the viewport bottom, where the newest output is.
-	cursors := make(map[string]int, len(scanInput))
-	for _, pane := range scanInput {
-		cursors[pane.ID] = pane.Rows - 1
-	}
-	// Graphics infos ride alongside the scan.
-	var (
-		infos   map[string]herdr.Graphics
-		scanned []links.Link
-		wg      sync.WaitGroup
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		infos = a.client.GraphicsInfos(ctx, ids)
-	}()
-	go func() {
-		defer wg.Done()
-		scanned = scanner.Links(ctx, scanInput)
-	}()
-	wg.Wait()
-
 	return handoff.Payload{
 		Focused: focused,
 		Panes:   panes,
 		Scrolls: scrolls,
-		Infos:   infos,
-		Found:   hints.Rank(scanned, focused, cursors),
-		Popup:   popupRect(layout.Area),
+		Found:   links.Uniq(hints.Rank(scanner.Links(ctx, scanPanes(panes, scrolls)), focused, cursors(panes, scrolls))),
 	}
+}
+
+// cursors sit at the viewport bottom, where the newest output is.
+func cursors(panes []herdr.Pane, scrolls map[string]herdr.Scroll) map[string]int {
+	cursors := make(map[string]int, len(panes))
+	for _, pane := range panes {
+		_, rows := contentSize(pane, scrolls[pane.ID].ViewportRows)
+		cursors[pane.ID] = rows - 1
+	}
+	return cursors
+}
+
+// contentSize strips the border off a pane's rect.
+func contentSize(pane herdr.Pane, viewportRows int) (cols, rows int) {
+	if viewportRows <= 0 || viewportRows > pane.Height {
+		return pane.Width, pane.Height
+	}
+	return pane.Width - (pane.Height - viewportRows), viewportRows
 }
 
 // scrollsFor fills scroll gaps with pane.get.
@@ -366,37 +297,21 @@ func paneIDs(panes []herdr.Pane) []string {
 func scanPanes(panes []herdr.Pane, scrolls map[string]herdr.Scroll) []scan.Pane {
 	out := make([]scan.Pane, len(panes))
 	for i, pane := range panes {
-		size := marks.Content(pane, scrolls[pane.ID].ViewportRows)
-		out[i] = scan.Pane{ID: pane.ID, Cols: size.Cols, Rows: size.Rows}
+		cols, rows := contentSize(pane, scrolls[pane.ID].ViewportRows)
+		out[i] = scan.Pane{ID: pane.ID, Cols: cols, Rows: rows}
 	}
 	return out
 }
 
+// itemsFor carries each link into the list: code and target, nothing
+// else. Repeats are already uniqified, so every row is distinct.
 func itemsFor(found []links.Link, codes []string) []ui.Item {
 	items := make([]ui.Item, len(found))
 	for i := range found {
-		items[i] = ui.Item{Code: codes[i]}
+		items[i] = ui.Item{
+			Code: codes[i],
+			URL:  found[i].URL,
+		}
 	}
 	return items
-}
-
-// firstBadges is every hint visible, nothing ruled out.
-func firstBadges(found []links.Link, codes []string) map[string][]overlay.Badge {
-	all := make([]int, len(found))
-	for i := range all {
-		all[i] = i
-	}
-	return hints.Badges(found, codes, all, "")
-}
-
-// narrowOpts redraws badges while narrowing, or leaves the pick a plain list.
-func narrowOpts(ctx context.Context, marker *marks.Marker, found []links.Link, codes []string) ui.Options {
-	opts := ui.Options{Alphabet: hints.DefaultAlphabet}
-	if !marker.Live() {
-		return opts
-	}
-	opts.OnNarrow = func(matches []int, typed string) {
-		marker.Draw(ctx, hints.Badges(found, codes, matches, typed))
-	}
-	return opts
 }

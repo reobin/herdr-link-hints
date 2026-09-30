@@ -39,16 +39,9 @@ func TestFocusedPanePrefersTheMostTrustedSource(t *testing.T) {
 
 // Not parallel: these cases set environment variables.
 func TestPaneShape(t *testing.T) {
-	t.Run("the fixed popup holds the readout", func(t *testing.T) {
-		if PopupWidth != "14" || PopupHeight != "5" {
+	t.Run("the fixed popup holds the list", func(t *testing.T) {
+		if PopupWidth != "80" || PopupHeight != "20" {
 			t.Fatalf("popup = %sx%s", PopupWidth, PopupHeight)
-		}
-	})
-	t.Run("the fixed width holds the widest readout lines", func(t *testing.T) {
-		for _, text := range []string{"⠋ scanning", "999 links", "no match"} {
-			if got := len([]rune(text)); got > contentCols {
-				t.Fatalf("%q is %d cells, wider than contentCols %d", text, got, contentCols)
-			}
 		}
 	})
 }
@@ -56,11 +49,9 @@ func TestPaneShape(t *testing.T) {
 func TestLoadReadsTheRest(t *testing.T) {
 	t.Setenv("HINTS_DEBUG", "/tmp/hints.log")
 	t.Setenv("HERDR_PLUGIN_STATE_DIR", "/state")
-	t.Setenv("TERM_PROGRAM", "ghostty")
 	t.Setenv("HINTS_HANDOFF", "/state/handoff-1.json")
 	cfg := Load()
-	if cfg.Debug != "/tmp/hints.log" || cfg.StateDir != "/state" ||
-		cfg.TermProgram != "ghostty" || cfg.HandoffPath != "/state/handoff-1.json" {
+	if cfg.Debug != "/tmp/hints.log" || cfg.StateDir != "/state" || cfg.HandoffPath != "/state/handoff-1.json" {
 		t.Fatalf("Load() = %+v", cfg)
 	}
 }

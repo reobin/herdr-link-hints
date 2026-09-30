@@ -10,19 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/reobin/herdr-link-hints/internal/theme"
 )
 
 const (
 	fallbackRows = 24
 	fallbackCols = 80
-)
-
-// One deadline covers all colour queries.
-const (
-	themeWait = 150 * time.Millisecond
-	maxReply  = 64
 )
 
 const spinnerTick = 90 * time.Millisecond
@@ -61,60 +53,6 @@ func (t *Terminal) interactive() bool { return t.keys != nil }
 
 // Size is what the pane got, not what was asked for.
 func (t *Terminal) Size() (rows, cols int) { return t.rows, t.cols }
-
-// Theme asks the terminal its colours, caching full replies by program.
-func (t *Terminal) Theme(program string) theme.Colors {
-	colors := theme.Fallback()
-	if !t.interactive() {
-		return colors
-	}
-	if cached, ok := theme.Load(program); ok {
-		return cached
-	}
-	for _, key := range theme.Keys {
-		_, _ = fmt.Fprint(t.out, theme.Query(key))
-	}
-	t.Flush()
-	seen := make(map[string]bool, len(theme.Keys))
-	deadline := time.Now().Add(themeWait)
-	for range theme.Keys {
-		reply, ok := t.readReply(deadline)
-		if !ok {
-			break
-		}
-		if key, rgb, ok := theme.Parse(reply); ok {
-			switch key {
-			case theme.KeyForeground, theme.KeyBackground, theme.KeyAccentRed, theme.KeyAccent, theme.KeyAccentBlue:
-				colors.Set(key, rgb)
-				seen[key] = true
-			}
-		}
-	}
-	if len(seen) == len(theme.Keys) {
-		_ = theme.Save(program, colors)
-	}
-	return colors
-}
-
-// readReply collects one OSC report ending at BEL or ST.
-func (t *Terminal) readReply(deadline time.Time) (string, bool) {
-	var reply strings.Builder
-	for reply.Len() < maxReply {
-		wait := time.Until(deadline)
-		if wait <= 0 {
-			return "", false
-		}
-		b, ok := t.nextByte(wait)
-		if !ok {
-			return "", false
-		}
-		reply.WriteByte(b)
-		if b == '\a' || strings.HasSuffix(reply.String(), "\x1b\\") {
-			return reply.String(), true
-		}
-	}
-	return "", false
-}
 
 func (t *Terminal) Close() {
 	if t.restore != nil {
