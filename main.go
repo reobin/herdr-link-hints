@@ -14,7 +14,6 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/config"
 	"github.com/reobin/herdr-link-hints/internal/demo"
 	"github.com/reobin/herdr-link-hints/internal/herdr"
-	"github.com/reobin/herdr-link-hints/internal/hints"
 	"github.com/reobin/herdr-link-hints/internal/ui"
 )
 
@@ -74,9 +73,8 @@ func start() (context.Context, context.CancelFunc, *app) {
 
 func runDemo(term *ui.Terminal) int {
 	found := demo.Ranked()
-	codes := demo.Codes()
 
-	index, picked := ui.Pick(term, itemsFor(found, codes), ui.Options{Alphabet: hints.DefaultAlphabet})
+	index, picked := ui.Pick(term, itemsFor(found))
 	if !picked {
 		return exitCancelled
 	}

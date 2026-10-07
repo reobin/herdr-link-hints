@@ -82,14 +82,13 @@ func TestItemsFor(t *testing.T) {
 		{URL: "https://b.io/y", Text: "#232", Row: 5, Col: 0, Pane: "w1:p2"},
 	}
 
-	codes := []string{"a", "s"}
-	got := itemsFor(found, codes)
+	got := itemsFor(found)
 	want := []ui.Item{
-		{Code: "a", URL: "https://a.io/x"},
-		{Code: "s", URL: "https://b.io/y"},
+		{URL: "https://a.io/x"},
+		{URL: "https://b.io/y"},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("itemsFor() = %+v, want code and URL only", got)
+		t.Fatalf("itemsFor() = %+v, want URL only", got)
 	}
 }
 
@@ -222,7 +221,7 @@ func TestOpenHandsTheScanToThePickerPane(t *testing.T) {
 }
 
 // Fed a handoff, the picker must not scan again.
-func TestPickOpensTheCodeItIsGiven(t *testing.T) {
+func TestPickOpensTheRowItIsGiven(t *testing.T) {
 	f := newFakeClient("see https://a.io/x for more")
 	f.activate = herdr.Activation{URL: "https://a.io/x", Handled: true}
 	dir := t.TempDir()
@@ -235,7 +234,7 @@ func TestPickOpensTheCodeItIsGiven(t *testing.T) {
 	}
 	a.cfg.HandoffPath = path
 
-	term, out := pipeTerminal(t, "a\n")
+	term, out := pipeTerminal(t, "https://a.io/x\n")
 	if code := a.pick(context.Background(), term); code != exitOK {
 		t.Fatalf("pick() = %d, want %d", code, exitOK)
 	}
@@ -276,7 +275,7 @@ func TestPickScansItselfWithoutAHandoff(t *testing.T) {
 	cfg.StateDir = t.TempDir()
 	a := testApp(t, f, cfg)
 
-	term, out := pipeTerminal(t, "a\n")
+	term, out := pipeTerminal(t, "https://a.io/x\n")
 	if code := a.pick(context.Background(), term); code != exitOK {
 		t.Fatalf("pick() = %d, want %d", code, exitOK)
 	}
@@ -286,8 +285,8 @@ func TestPickScansItselfWithoutAHandoff(t *testing.T) {
 	}
 }
 
-// pipeTerminal drives the picker down its non-tty path, a code per line.
-func pipeTerminal(t *testing.T, typed string) (*ui.Terminal, *bytes.Buffer) {
+// pipeTerminal drives the picker down its non-tty path, a URL per line.
+func pipeTerminal(t *testing.T, input string) (*ui.Terminal, *bytes.Buffer) {
 	t.Helper()
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -296,7 +295,7 @@ func pipeTerminal(t *testing.T, typed string) (*ui.Terminal, *bytes.Buffer) {
 	t.Cleanup(func() { _ = reader.Close() })
 	go func() {
 		defer func() { _ = writer.Close() }()
-		_, _ = io.WriteString(writer, typed)
+		_, _ = io.WriteString(writer, input)
 	}()
 	var out bytes.Buffer
 	return ui.Open(reader, &out), &out
@@ -467,7 +466,7 @@ func TestPickStopsWhenNothingNamesAPane(t *testing.T) {
 	cfg.StateDir = t.TempDir()
 	a := testApp(t, f, cfg)
 
-	term, out := pipeTerminal(t, "a\n")
+	term, out := pipeTerminal(t, "https://a.io/x\n")
 	if code := a.pick(context.Background(), term); code != exitCancelled {
 		t.Fatalf("pick() = %d, want %d", code, exitCancelled)
 	}
@@ -477,15 +476,15 @@ func TestPickStopsWhenNothingNamesAPane(t *testing.T) {
 	}
 }
 
-// An unmatched code is a quit, not a failure.
-func TestPickCancelsOnACodeThatMatchesNothing(t *testing.T) {
+// An unmatched URL is a quit, not a failure.
+func TestPickCancelsOnAnUnknownURL(t *testing.T) {
 	t.Setenv("HERDR_ACTIVE_PANE_ID", "w1:p1")
 	f := newFakeClient("see https://a.io/x for more")
 	cfg := config.Load()
 	cfg.StateDir = t.TempDir()
 	a := testApp(t, f, cfg)
 
-	term, _ := pipeTerminal(t, "zz\n")
+	term, _ := pipeTerminal(t, "https://unknown.io/\n")
 	if code := a.pick(context.Background(), term); code != exitCancelled {
 		t.Fatalf("pick() = %d, want %d", code, exitCancelled)
 	}
@@ -501,7 +500,7 @@ func TestPickFailsWhenTheLinkMovedOffScreen(t *testing.T) {
 	cfg.StateDir = t.TempDir()
 	a := testApp(t, f, cfg)
 
-	term, out := pipeTerminal(t, "a\n")
+	term, out := pipeTerminal(t, "https://a.io/x\n")
 	if code := a.pick(context.Background(), term); code != exitFailed {
 		t.Fatalf("pick() = %d, want %d", code, exitFailed)
 	}
@@ -520,7 +519,7 @@ func TestPickFailsWhenTheBrowserRefusesTheURL(t *testing.T) {
 	cfg.StateDir = t.TempDir()
 	a := testApp(t, f, cfg)
 
-	term, out := pipeTerminal(t, "a\n")
+	term, out := pipeTerminal(t, "https://a.io/x\n")
 	if code := a.pick(context.Background(), term); code != exitFailed {
 		t.Fatalf("pick() = %d, want %d", code, exitFailed)
 	}

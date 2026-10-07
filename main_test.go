@@ -106,7 +106,7 @@ func TestRunRejectsAnUnknownArgument(t *testing.T) {
 }
 
 func TestRunDemoOpensTheLinkItIsGiven(t *testing.T) {
-	term, out := pipeTerminal(t, "a\n")
+	term, out := pipeTerminal(t, "https://c.io/x\n")
 	if code := runDemo(term); code != exitOK {
 		t.Fatalf("runDemo() = %d, want %d", code, exitOK)
 	}
@@ -116,9 +116,9 @@ func TestRunDemoOpensTheLinkItIsGiven(t *testing.T) {
 	}
 }
 
-// Esc or an unmatched code is a quit, not a failure.
+// Esc or an unknown URL is a quit, not a failure.
 func TestRunDemoCancels(t *testing.T) {
-	term, _ := pipeTerminal(t, "zz\n")
+	term, _ := pipeTerminal(t, "https://unknown.io/\n")
 	if code := runDemo(term); code != exitCancelled {
 		t.Fatalf("runDemo() = %d, want %d", code, exitCancelled)
 	}

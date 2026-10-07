@@ -31,10 +31,6 @@ func Ranked() []links.Link {
 	return hints.Rank(Links(), Pane, map[string]int{Pane: Rows - 1})
 }
 
-func Codes() []string {
-	return hints.Codes(len(Links()), hints.DefaultAlphabet)
-}
-
 // PaneLines is the synthetic demo screen.
 func PaneLines() []string {
 	lines := []string{

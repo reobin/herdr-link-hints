@@ -110,39 +110,40 @@ func TestReadKeySlowEscapeIsNotASequence(t *testing.T) {
 	}
 }
 
-func items(codes ...string) []Item {
-	out := make([]Item, len(codes))
-	for i, code := range codes {
-		out[i] = Item{Code: code, URL: "https://x.io/" + code}
+func items(names ...string) []Item {
+	out := make([]Item, len(names))
+	for i, name := range names {
+		out[i] = Item{URL: "https://x.io/" + name}
 	}
 	return out
 }
 
 func TestPick(t *testing.T) {
 	t.Parallel()
-	opts := Options{Alphabet: "asdfghjkl"}
 	tests := []struct {
 		name  string
 		input string
 		want  int
 		ok    bool
 	}{
-		{"unambiguous code selects without Enter", "sa", 3, true},
-		{"backspace edits", "sd\x7fa", 3, true},
+		{"enter opens the first row", "\r", 0, true},
 		{"escape quits", "\x1b", 0, false},
-		{"arrow key does not quit", "\x1b[Asa", 3, true},
 		{"down then Enter opens the highlighted row", "\x1b[B\r", 1, true},
 		{"up at the top stays", "\x1b[A\r", 0, true},
 		{"down past the end stays", "\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r", 4, true},
-		{"typing resets the selection to the head", "\x1b[B\x1b[Bs\r", 3, true},
-		{"input running out quits", "s", 0, false},
-		{"keys outside the alphabet are ignored", "zsqa", 3, true},
+		{"j moves down", "j\r", 1, true},
+		{"k at the top stays", "k\r", 0, true},
+		{"j and k move", "jjk\r", 1, true},
+		{"arrows and j/k mix", "\x1b[Bj\x1b[Bk\r", 2, true},
+		{"ctrl-n and ctrl-p move", "\x0e\x0e\x10\r", 1, true},
+		{"other keys are ignored", "azx\r", 0, true},
+		{"input running out quits", "j", 0, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			term, _ := keyTerminal(t, []byte(tc.input))
-			got, ok := Pick(term, items("aa", "as", "ad", "sa", "ss"), opts)
+			got, ok := Pick(term, items("aa", "as", "ad", "sa", "ss"))
 			if ok != tc.ok || (ok && got != tc.want) {
 				t.Fatalf("Pick() = %d, %v; want %d, %v", got, ok, tc.want, tc.ok)
 			}
@@ -150,48 +151,28 @@ func TestPick(t *testing.T) {
 	}
 }
 
-func TestPickEnterConfirmsASingleMatch(t *testing.T) {
-	t.Parallel()
-	term, _ := keyTerminal(t, []byte("\r"))
-	got, ok := Pick(term, items("a"), Options{Alphabet: "asdfghjkl"})
-	if !ok || got != 0 {
-		t.Fatalf("Pick() = %d, %v", got, ok)
-	}
-}
-
-// A fully typed short code selects at once: prefix-free codes have no
-// longer sibling waiting on another keystroke.
-func TestPickSelectsAShortCodeWithoutEnter(t *testing.T) {
-	t.Parallel()
-	term, _ := keyTerminal(t, []byte("a"))
-	got, ok := Pick(term, items("a", "sa", "ss"), Options{Alphabet: "asdfghjkl"})
-	if !ok || got != 0 {
-		t.Fatalf("Pick() = %d, %v, want the short code without Enter", got, ok)
-	}
-}
-
 func TestPickByLine(t *testing.T) {
 	t.Parallel()
-	term, _ := lineTerminal("ad\n")
-	got, ok := Pick(term, items("aa", "as", "ad"), Options{Alphabet: "asdfghjkl"})
+	term, _ := lineTerminal("https://x.io/ad\n")
+	got, ok := Pick(term, items("aa", "as", "ad"))
 	if !ok || got != 2 {
 		t.Fatalf("Pick() = %d, %v", got, ok)
 	}
 
-	term, _ = lineTerminal("zz\n")
-	if _, ok := Pick(term, items("aa"), Options{Alphabet: "asdfghjkl"}); ok {
-		t.Fatal("an unknown code should not select anything")
+	term, _ = lineTerminal("https://x.io/zz\n")
+	if _, ok := Pick(term, items("aa")); ok {
+		t.Fatal("an unknown URL should not select anything")
 	}
 }
 
-// The list shows the status, one row per match with code and URL, and
+// The list shows the status, one row per link with its URL, and
 // the key help on the last row with the slack above it. The selection
 // inverts edge to edge.
 func TestRenderListShowsStatusRowsAndHelp(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
 	term.rows, term.cols = 10, 60
-	term.renderList(items("a", "s"), []int{0, 1}, 1, "")
+	term.renderList(items("a", "s"), 1)
 	term.Flush()
 
 	text := stripSGR(out.String())
@@ -199,10 +180,10 @@ func TestRenderListShowsStatusRowsAndHelp(t *testing.T) {
 	want := []string{
 		" 2 links",
 		"",
-		" a  https://x.io/a",
-		" s  https://x.io/s" + strings.Repeat(" ", 42),
+		" https://x.io/a",
+		" https://x.io/s" + strings.Repeat(" ", 45),
 		"", "", "", "", "",
-		" ↑↓ move   enter open   esc quit",
+		" ↑↓/jk move   enter open   esc quit",
 	}
 	if !slices.Equal(rows, want) {
 		t.Fatalf("rendered list:\n%s\nwant:\n%s", text, strings.Join(want, "\r\n"))
@@ -213,42 +194,42 @@ func TestRenderListShowsStatusRowsAndHelp(t *testing.T) {
 	}
 }
 
-// The status says how much of the list a typed prefix keeps.
-func TestRenderListCountsTheNarrowedList(t *testing.T) {
+// The status says how many links the list holds.
+func TestRenderListCountsTheList(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
 	term.rows, term.cols = 6, 40
-	term.renderList(items("aa", "as", "ad", "sa", "ss", "sd"), []int{0, 1, 2}, 0, "a")
+	term.renderList(items("aa", "as", "ad", "sa", "ss", "sd"), 0)
 	term.Flush()
-	if text := stripSGR(out.String()); !strings.Contains(text, "3 of 6") {
+	if text := stripSGR(out.String()); !strings.Contains(text, "6 links") {
 		t.Fatalf("rendered list has no count:\n%s", text)
 	}
 }
 
 // A clamped popup drops the side padding, shortens the help, and keeps
-// the code when the URL cannot fit.
+// the URL when it fits.
 func TestRenderListAdaptsToASmallPopup(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
 	term.rows, term.cols = 3, 20
-	term.renderList(items("a"), []int{0}, 0, "")
+	term.renderList(items("a"), 0)
 	term.Flush()
 	rows := strings.Split(stripSGR(out.String()), "\r\n")
-	want := []string{"1 link", "a  https://x.io/a" + strings.Repeat(" ", 3), "↑↓   enter   esc"}
+	want := []string{"1 link", "https://x.io/a" + strings.Repeat(" ", 6), "↑↓/jk   enter   esc"}
 	if !slices.Equal(rows, want) {
 		t.Fatalf("rows = %q, want %q", rows, want)
 	}
 }
 
-// Nothing matching is a readout, not a crash: the count goes to zero
-// and the list names the prefix.
-func TestRenderListSaysWhenNothingMatches(t *testing.T) {
+// An empty list is a readout, not a crash: the count goes to zero and
+// the list says so.
+func TestRenderListSaysWhenThereAreNoLinks(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
-	term.renderList(items("a"), nil, 0, "z")
+	term.renderList(nil, 0)
 	term.Flush()
 	text := stripSGR(out.String())
-	for _, want := range []string{"0 of 1", "no link starts with z"} {
+	for _, want := range []string{"0 links", "no links"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("rendered list has no %q:\n%s", want, text)
 		}
@@ -260,8 +241,8 @@ func TestRenderListTruncatesToThePopup(t *testing.T) {
 	t.Parallel()
 	term, out := keyTerminal(t, nil)
 	term.rows, term.cols = 5, 30
-	long := Item{Code: "a", URL: "https://x.io/a-very-long-path-here"}
-	term.renderList([]Item{long}, []int{0}, 0, "")
+	long := Item{URL: "https://x.io/a-very-long-path-here"}
+	term.renderList([]Item{long}, 0)
 	term.Flush()
 	for _, row := range strings.Split(stripSGR(out.String()), "\r\n") {
 		if cells.Width(strings.TrimSpace(row)) > 30 {
@@ -281,8 +262,8 @@ func TestRenderListSanitizesControlCharacters(t *testing.T) {
 	}
 	term, out := keyTerminal(t, nil)
 	term.rows, term.cols = 5, 40
-	bad := Item{Code: "a", URL: "https://x.io/a\r\nb"}
-	term.renderList([]Item{bad}, []int{0}, 0, "")
+	bad := Item{URL: "https://x.io/a\r\nb"}
+	term.renderList([]Item{bad}, 0)
 	term.Flush()
 	rows := strings.Split(stripSGR(out.String()), "\r\n")
 	if len(rows) != term.rows {
@@ -296,20 +277,19 @@ func TestRenderListSanitizesControlCharacters(t *testing.T) {
 // The window follows the selection so it never scrolls out of sight.
 func TestWindowKeepsSelectionVisible(t *testing.T) {
 	t.Parallel()
-	matches := []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
-	if got := window(matches, 0, 4); !slices.Equal(got, []int{0, 1, 2, 3}) {
+	if got := window(10, 0, 4); !slices.Equal(got, []int{0, 1, 2, 3}) {
 		t.Fatalf("window() = %v", got)
 	}
-	if got := window(matches, 9, 4); !slices.Equal(got, []int{6, 7, 8, 9}) {
+	if got := window(10, 9, 4); !slices.Equal(got, []int{6, 7, 8, 9}) {
 		t.Fatalf("window() = %v", got)
 	}
-	if got := window(matches, 5, 4); len(got) != 4 || !slices.Contains(got, 5) {
+	if got := window(10, 5, 4); len(got) != 4 || !slices.Contains(got, 5) {
 		t.Fatalf("window() = %v, want the selection on screen", got)
 	}
-	if got := window(matches, 0, 99); !slices.Equal(got, matches) {
-		t.Fatalf("window() = %v, want every match", got)
+	if got := window(10, 0, 99); !slices.Equal(got, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}) {
+		t.Fatalf("window() = %v, want every row", got)
 	}
-	if got := window(nil, 0, 4); len(got) != 0 {
+	if got := window(0, 0, 4); len(got) != 0 {
 		t.Fatalf("window() = %v, want nothing", got)
 	}
 }

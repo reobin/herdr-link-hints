@@ -1,14 +1,12 @@
 # herdr-link-hints
 
 Keyboard link hints for [herdr](https://herdr.dev).
-Tap a key, get a popup listing the links on screen, type a code
-or pick a row to open one.
+Tap a key, get a popup listing the links on screen, pick a row
+to open one.
 
-Each row is one link: its hint code and its URL, each URL listed
-once.
+Each row is one link: its URL, each URL listed once.
 
-Type a code to open its link at once, or move with the arrow keys
-and confirm with Enter.
+Move with the arrow keys or j/k and confirm with Enter.
 
 ![demo](docs/demo.gif)
 

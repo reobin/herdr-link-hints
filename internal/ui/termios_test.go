@@ -34,7 +34,7 @@ func TestRawModeClearsTheFlagsKeysDependOn(t *testing.T) {
 	cleared("OPOST", raw.Oflag&syscall.OPOST != 0)
 
 	if raw.Cflag&syscall.CS8 == 0 {
-		t.Error("CS8 not set: a hint code byte could be stripped to 7 bits")
+		t.Error("CS8 not set: an input byte could be stripped to 7 bits")
 	}
 	if raw.Cc[syscall.VMIN] != 1 || raw.Cc[syscall.VTIME] != 0 {
 		t.Errorf("VMIN/VTIME = %d/%d, want 1/0 so a read returns on one byte", raw.Cc[syscall.VMIN], raw.Cc[syscall.VTIME])

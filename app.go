@@ -109,8 +109,7 @@ func (a *app) pick(ctx context.Context, term *ui.Terminal) int {
 		return exitCancelled
 	}
 
-	codes := hints.Codes(len(found), hints.DefaultAlphabet)
-	index, picked := ui.Pick(term, itemsFor(found, codes), ui.Options{Alphabet: hints.DefaultAlphabet})
+	index, picked := ui.Pick(term, itemsFor(found))
 	if !picked {
 		return exitCancelled
 	}
@@ -303,14 +302,13 @@ func scanPanes(panes []herdr.Pane, scrolls map[string]herdr.Scroll) []scan.Pane 
 	return out
 }
 
-// itemsFor carries each link into the list: code and target, nothing
-// else. Repeats are already uniqified, so every row is distinct.
-func itemsFor(found []links.Link, codes []string) []ui.Item {
+// itemsFor carries each link into the list: its target, nothing else.
+// Repeats are already uniqified, so every row is distinct.
+func itemsFor(found []links.Link) []ui.Item {
 	items := make([]ui.Item, len(found))
 	for i := range found {
 		items[i] = ui.Item{
-			Code: codes[i],
-			URL:  found[i].URL,
+			URL: found[i].URL,
 		}
 	}
 	return items

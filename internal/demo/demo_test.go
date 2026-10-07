@@ -23,13 +23,6 @@ func TestRankedIsDeterministic(t *testing.T) {
 	if first[0].URL != "https://c.io/x" {
 		t.Fatalf("Ranked()[0].URL = %q, want the link nearest the cursor", first[0].URL)
 	}
-	seen := map[string]bool{}
-	for _, c := range Codes() {
-		if seen[c] {
-			t.Fatalf("Codes() has a duplicate %q", c)
-		}
-		seen[c] = true
-	}
 }
 
 func TestPaneLinesAnchorTheLinks(t *testing.T) {

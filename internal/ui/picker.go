@@ -8,117 +8,91 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/cells"
 )
 
-// Item is one listed link: its code and its URL.
+// Item is one listed link: its URL.
 type Item struct {
-	Code string
-	URL  string
+	URL string
 }
 
-type Options struct {
-	Alphabet string
-}
-
-// Pick selects a row: type its code, or move the selection and confirm.
-// A code that names one row opens it at once, without Enter.
-func Pick(t *Terminal, items []Item, opts Options) (int, bool) {
-	// Piped input reads a code per line.
+// Pick selects a row: move the selection and confirm with Enter.
+func Pick(t *Terminal, items []Item) (int, bool) {
+	// Piped input reads a URL per line.
 	if !t.interactive() {
 		return t.pickByLine(items)
 	}
-	typed := ""
 	sel := 0
 	for {
-		matches := matching(items, typed)
-		sel = clampSel(sel, len(matches))
-		// Decide before drawing; that frame would tear down at once.
-		if len(matches) == 1 && typed != "" {
-			return matches[0], true
-		}
-		t.renderList(items, matches, sel, typed)
+		sel = clampSel(sel, len(items))
+		t.renderList(items, sel)
 		switch k := t.readKey(); k.kind {
 		case keyEnd, keyEscape:
 			return 0, false
-		case keyBackspace:
-			if typed != "" {
-				typed = typed[:len(typed)-1]
-				sel = 0
-			}
 		case keyEnter:
-			if len(matches) > 0 {
-				return matches[sel], true
+			if len(items) > 0 {
+				return sel, true
 			}
 		case keyUp:
 			if sel > 0 {
 				sel--
 			}
 		case keyDown:
-			if sel < len(matches)-1 {
+			if sel < len(items)-1 {
 				sel++
 			}
 		case keyRune:
-			if strings.ContainsRune(opts.Alphabet, k.r) {
-				typed += string(k.r)
-				sel = 0
+			switch k.r {
+			case 'j':
+				if sel < len(items)-1 {
+					sel++
+				}
+			case 'k':
+				if sel > 0 {
+					sel--
+				}
 			}
 		}
 	}
 }
 
-// clampSel keeps the selection on the narrowed list.
-func clampSel(sel, matches int) int {
-	if matches == 0 {
+// clampSel keeps the selection on the list.
+func clampSel(sel, total int) int {
+	if total == 0 {
 		return 0
 	}
-	return min(max(sel, 0), matches-1)
+	return min(max(sel, 0), total-1)
 }
 
-// pickByLine reads one code per line.
+// pickByLine reads one URL per line.
 func (t *Terminal) pickByLine(items []Item) (int, bool) {
 	line, err := t.lines.ReadString('\n')
-	code := strings.TrimSpace(line)
-	if code == "" || (err != nil && line == "") {
+	url := strings.TrimSpace(line)
+	if url == "" || (err != nil && line == "") {
 		return 0, false
 	}
 	for i, item := range items {
-		if item.Code == code {
+		if item.URL == url {
 			return i, true
 		}
 	}
 	return 0, false
 }
 
-func matching(items []Item, typed string) []int {
-	var out []int
-	for i, item := range items {
-		if strings.HasPrefix(item.Code, typed) {
-			out = append(out, i)
-		}
-	}
-	return out
-}
-
-// renderList draws the status, the match window, and the key help
+// renderList draws the status, the visible window, and the key help
 // pinned to the last row.
-func (t *Terminal) renderList(items []Item, matches []int, sel int, typed string) {
-	selected := -1
-	if len(matches) > 0 {
-		selected = matches[sel]
-	}
+func (t *Terminal) renderList(items []Item, sel int) {
 	l := layout{
 		width: t.cols,
 		pad:   sidePad(t.cols),
-		code:  widest(items, func(item Item) string { return item.Code }),
 	}
 	height, spaced := listHeight(t.rows)
-	lines := []string{sprintLine(l.statusLine(typed, len(matches), len(items)))}
+	lines := []string{sprintLine(l.statusLine(len(items)))}
 	if spaced {
 		lines = append(lines, "")
 	}
-	if len(matches) == 0 && height > 0 {
-		lines = append(lines, sprintLine(l.emptyLine(typed)))
+	if len(items) == 0 && height > 0 {
+		lines = append(lines, sprintLine(l.emptyLine()))
 	}
-	for _, row := range window(matches, sel, height) {
-		lines = append(lines, sprintLine(l.itemLine(items[row], row == selected)))
+	for _, row := range window(len(items), sel, height) {
+		lines = append(lines, sprintLine(l.itemLine(items[row], row == sel)))
 	}
 	if t.rows >= 3 {
 		for len(lines) < t.rows-1 {
@@ -136,7 +110,6 @@ func (t *Terminal) renderList(items []Item, matches []int, sel int, typed string
 type layout struct {
 	width int
 	pad   int
-	code  int
 }
 
 const gap = "  "
@@ -162,48 +135,42 @@ func listHeight(rows int) (height int, spaced bool) {
 	}
 }
 
-func widest(items []Item, field func(Item) string) int {
-	w := 0
-	for _, item := range items {
-		w = max(w, cells.Width(field(item)))
+// window is the rows on screen, kept around the selection.
+func window(total, sel, height int) []int {
+	if height <= 0 {
+		return nil
 	}
-	return w
-}
-
-// window is the slice of matches on screen, kept around the selection.
-func window(matches []int, sel, height int) []int {
-	if height <= 0 || len(matches) <= height {
-		return matches[:min(len(matches), max(height, 0))]
+	if total <= height {
+		out := make([]int, 0, max(total, 0))
+		for i := 0; i < total; i++ {
+			out = append(out, i)
+		}
+		return out
 	}
-	start := min(max(sel-height/2, 0), len(matches)-height)
-	return matches[start : start+height]
+	start := min(max(sel-height/2, 0), total-height)
+	out := make([]int, 0, height)
+	for i := start; i < start+height; i++ {
+		out = append(out, i)
+	}
+	return out
 }
 
-// statusLine is the link count on the left: the whole list, or how
-// much of it the typed prefix keeps.
-func (l layout) statusLine(typed string, matches, total int) line {
-	return l.spread(line{{text: count(matches, total, typed != ""), sgr: "2"}}, nil)
+// statusLine is the link count on the left.
+func (l layout) statusLine(total int) line {
+	return l.spread(line{{text: count(total), sgr: "2"}}, nil)
 }
 
-// count is the whole list, or how much of it the typed prefix keeps.
-func count(matches, total int, narrowed bool) string {
-	switch {
-	case narrowed:
-		return strconv.Itoa(matches) + " of " + strconv.Itoa(total)
-	case matches == 1:
+// count is the whole list.
+func count(total int) string {
+	if total == 1 {
 		return "1 link"
-	default:
-		return strconv.Itoa(matches) + " links"
 	}
+	return strconv.Itoa(total) + " links"
 }
 
-// emptyLine stands in for the list when nothing matches.
-func (l layout) emptyLine(typed string) line {
-	text := "no links"
-	if typed != "" {
-		text = "no link starts with " + typed
-	}
-	return truncateLine(append(l.indent(), segment{text: text, sgr: "2"}), l.width)
+// emptyLine stands in for the list when there is nothing to show.
+func (l layout) emptyLine() line {
+	return truncateLine(append(l.indent(), segment{text: "no links", sgr: "2"}), l.width)
 }
 
 // footerLine is the key help, shortened when the popup is clamped.
@@ -218,7 +185,7 @@ func (l layout) footerLine() line {
 // footerHelp pairs each key with its action the way TUIs usually do:
 // the key bright, what it does dim.
 func footerHelp(short bool) line {
-	keys := []string{"↑↓", "enter", "esc"}
+	keys := []string{"↑↓/jk", "enter", "esc"}
 	labels := []string{"move", "open", "quit"}
 	var out line
 	for i, key := range keys {
@@ -233,15 +200,12 @@ func footerHelp(short bool) line {
 	return out
 }
 
-// itemLine is one row: code and URL. The selected row inverts edge to
-// edge so it reads without colour support.
+// itemLine is one row: its URL. The selected row inverts edge to edge
+// so it reads without colour support.
 func (l layout) itemLine(item Item, selected bool) line {
-	room := l.width - 2*l.pad - l.code - len(gap)
+	room := l.width - 2*l.pad
 	url := truncate(sanitize(item.URL), room)
-	out := append(l.indent(), segment{text: padRight(item.Code, l.code), sgr: "1"})
-	if url != "" {
-		out = append(out, segment{text: gap + url})
-	}
+	out := append(l.indent(), segment{text: url})
 	out = truncateLine(out, l.width)
 	if !selected {
 		return out
@@ -290,10 +254,6 @@ func (l layout) spread(left, right line) line {
 	out = append(out, left...)
 	out = append(out, segment{text: strings.Repeat(" ", room-left.width()-right.width())})
 	return append(out, right...)
-}
-
-func padRight(s string, width int) string {
-	return s + strings.Repeat(" ", max(width-cells.Width(s), 0))
 }
 
 // sanitize drops control runes so an untrusted OSC 8 target cannot move

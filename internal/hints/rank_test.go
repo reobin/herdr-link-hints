@@ -81,7 +81,7 @@ func TestRankLeavesTheInputAlone(t *testing.T) {
 	}
 }
 
-// Short codes go to likely targets, not document order: the focused pane
+// Likely targets go before document order: the focused pane
 // wins over a nearer cursor elsewhere, and nearness wins over recency.
 func TestRankOrdersLikelyTargetsBeforeDocumentOrder(t *testing.T) {
 	t.Parallel()
