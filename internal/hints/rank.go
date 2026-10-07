@@ -1,3 +1,4 @@
+// Package hints ranks link targets so the likeliest come first.
 package hints
 
 import (
