@@ -45,8 +45,7 @@ func paneWithLinks(tb testing.TB, n int) []string {
 }
 
 func benchmarkPaneLinks(b *testing.B, lines []string) {
-	scanner := newScanner(&fakeSource{text: paneText("w1:p1", lines...)})
-	scanner.SkipObserve = true
+	scanner := newScanner(&fakeSource{raw: paneRaw("w1:p1", lines...)})
 	pane := Pane{ID: "w1:p1", Cols: paneCols, Rows: len(lines)}
 	ctx := context.Background()
 	b.ReportAllocs()

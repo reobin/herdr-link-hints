@@ -12,10 +12,10 @@ import (
 	"github.com/reobin/herdr-link-hints/internal/links"
 )
 
-// Source is the Herdr slice scanning needs.
+// Source is the Herdr slice scanning needs: one ANSI read per pane
+// carries both the visible text and the OSC 8 links riding on it.
 type Source interface {
-	PaneLines(ctx context.Context, pane string) ([]string, error)
-	ObserveOSC8(ctx context.Context, pane string, cols, rows int) ([]ansi.Link, error)
+	PaneANSI(ctx context.Context, pane string) (string, error)
 }
 
 // Pane is a pane to scan and its content size.
@@ -27,9 +27,8 @@ type Pane struct {
 
 // Scanner logs failed reads rather than failing the scan.
 type Scanner struct {
-	Source      Source
-	Log         *slog.Logger
-	SkipObserve bool
+	Source Source
+	Log    *slog.Logger
 }
 
 // Links keeps pane order, so codes stay predictable.
@@ -53,30 +52,7 @@ func (s *Scanner) Links(ctx context.Context, panes []Pane) []links.Link {
 }
 
 func (s *Scanner) paneLinks(ctx context.Context, pane Pane) []links.Link {
-	var (
-		visible []string
-		hidden  []ansi.Link
-		wg      sync.WaitGroup
-	)
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		visible = s.read(ctx, pane.ID)
-	}()
-	go func() {
-		defer wg.Done()
-		if s.SkipObserve {
-			return
-		}
-		found, err := s.Source.ObserveOSC8(ctx, pane.ID, pane.Cols, pane.Rows)
-		if err != nil {
-			s.Log.Debug("observe failed", "pane", pane.ID, "error", err)
-			return
-		}
-		hidden = found
-	}()
-	wg.Wait()
-
+	visible, hidden := s.read(ctx, pane.ID)
 	if len(visible) == 0 {
 		return nil
 	}
@@ -171,12 +147,13 @@ func carries(visible []string, matches [][]links.Match) []carry {
 	return out
 }
 
-func (s *Scanner) read(ctx context.Context, pane string) []string {
-	text, err := s.Source.PaneLines(ctx, pane)
+func (s *Scanner) read(ctx context.Context, pane string) ([]string, []ansi.Link) {
+	raw, err := s.Source.PaneANSI(ctx, pane)
 	if err != nil {
 		s.Log.Debug("pane read failed", "pane", pane, "error", err)
+		return nil, nil
 	}
-	return text
+	return ansi.Lines(raw), ansi.ParseLinks([]byte(raw))
 }
 
 // stillThere reports whether a link is still at its cell after scrolling.
@@ -233,7 +210,7 @@ func wrapped(visible []string, choice links.Link, row int) bool {
 // Locate re-resolves a link's cell after scrolling.
 func (s *Scanner) Locate(ctx context.Context, choice links.Link, shift int) (row, col int, ok bool) {
 	shifted := choice.Row - shift
-	visible := s.read(ctx, choice.Pane)
+	visible, _ := s.read(ctx, choice.Pane)
 	// Prefer the hinted cell over the first match anywhere.
 	if stillThere(visible, choice, shifted) {
 		return shifted, choice.Col, true

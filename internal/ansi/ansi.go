@@ -27,7 +27,20 @@ const (
 var (
 	csiPattern  = regexp.MustCompile("\x1b\\[([0-9;?]*)?([A-Za-z])")
 	osc8Pattern = regexp.MustCompile("\x1b\\]8;[^;]*;([^\x1b\x07]*?)(?:\x1b\\\\|\x07)")
+	// seqPattern matches the escape sequences a pane read carries:
+	// SGR styling, OSC 8 hyperlinks, and anything else Herdr formats inline.
+	seqPattern = regexp.MustCompile("\x1b\\[[0-9;?]*[A-Za-z]|\x1b\\][^\x1b\x07]*(?:\x1b\\\\|\x07)")
 )
+
+// Lines strips escape sequences, leaving the visible text per row.
+// The pane-width padding trims off, matching a text-format read.
+func Lines(data string) []string {
+	rows := strings.Split(seqPattern.ReplaceAllString(data, ""), "\n")
+	for i, row := range rows {
+		rows[i] = strings.TrimRight(row, " \t\r")
+	}
+	return rows
+}
 
 // ParseLinks drops links whose close never arrives.
 func ParseLinks(data []byte) []Link {

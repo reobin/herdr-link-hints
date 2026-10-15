@@ -87,6 +87,36 @@ func TestPaneLinesOverSocket(t *testing.T) {
 	}
 }
 
+func TestPaneANSIOverSocket(t *testing.T) {
+	t.Parallel()
+	const ansi = "go \x1b]8;;https://g.io/pull/232\x1b\\#232\x1b]8;;\x1b\\\n"
+	requests := make(chan map[string]any, 1)
+	socket := fakeServer(t, func(request map[string]any) [][]byte {
+		requests <- request
+		return [][]byte{mustJSON(t, map[string]any{
+			"id":     request["id"],
+			"result": map[string]any{"type": "pane_read", "read": map[string]any{"text": ansi}},
+		})}
+	})
+
+	got, err := New(WithSocket(socket)).PaneANSI(context.Background(), "w1:p1")
+	if err != nil {
+		t.Fatalf("PaneANSI: %v", err)
+	}
+	if got != ansi {
+		t.Fatalf("PaneANSI() = %q, want the escape sequences untouched", got)
+	}
+
+	request := <-requests
+	if request["method"] != "pane.read" {
+		t.Fatalf("method = %v", request["method"])
+	}
+	params, _ := request["params"].(map[string]any)
+	if params["pane_id"] != "w1:p1" || params["source"] != "visible" || params["format"] != "ansi" {
+		t.Fatalf("params = %+v", params)
+	}
+}
+
 func TestScreenPanesOverSocket(t *testing.T) {
 	t.Parallel()
 	requests := make(chan map[string]any, 1)
@@ -154,6 +184,9 @@ func TestSocketFallsBackToCLI(t *testing.T) {
 		t.Fatalf("ScreenPanes() = %+v, want %+v", panes, want)
 	}
 	if _, err := client.PaneLines(context.Background(), "w1:p9"); err == nil {
+		t.Fatal("expected an error when both paths fail")
+	}
+	if _, err := client.PaneANSI(context.Background(), "w1:p9"); err == nil {
 		t.Fatal("expected an error when both paths fail")
 	}
 	if scroll, err := client.PaneScroll(context.Background(), "w1:p9"); err == nil {

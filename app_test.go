@@ -13,7 +13,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/reobin/herdr-link-hints/internal/ansi"
 	"github.com/reobin/herdr-link-hints/internal/config"
 	"github.com/reobin/herdr-link-hints/internal/handoff"
 	"github.com/reobin/herdr-link-hints/internal/herdr"
@@ -130,18 +129,14 @@ type fakeClient struct {
 	activateErr error
 }
 
-func (f *fakeClient) PaneLines(_ context.Context, pane string) ([]string, error) {
+func (f *fakeClient) PaneANSI(_ context.Context, pane string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads++
 	if f.rescan != nil && f.reads > 1 {
-		return f.rescan[pane], nil
+		return strings.Join(f.rescan[pane], "\n"), nil
 	}
-	return f.lines[pane], nil
-}
-
-func (f *fakeClient) ObserveOSC8(context.Context, string, int, int) ([]ansi.Link, error) {
-	return nil, nil
+	return strings.Join(f.lines[pane], "\n"), nil
 }
 
 func (f *fakeClient) ScreenPanes(context.Context, string) (herdr.Layout, error) {

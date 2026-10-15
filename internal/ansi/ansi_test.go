@@ -61,6 +61,49 @@ func TestParseLinks(t *testing.T) {
 	}
 }
 
+func TestLines(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{
+			name: "plain text passes through",
+			raw:  "go https://a.io/x here",
+			want: []string{"go https://a.io/x here"},
+		},
+		{
+			name: "styling strips, label stays",
+			raw:  "\x1b[1mgo\x1b[0m \x1b]8;;https://g.io/pull/232\x1b\\#232\x1b]8;;\x1b\\ here",
+			want: []string{"go #232 here"},
+		},
+		{
+			name: "BEL-terminated hyperlink strips",
+			raw:  "see \x1b]8;;https://e.io/t\x07HI\x1b]8;;\x07.",
+			want: []string{"see HI."},
+		},
+		{
+			name: "pane-width padding trims off",
+			raw:  "\x1b[0mshort\x1b[0m   \r\n\x1b[0m   \x1b[0m\r\nlast",
+			want: []string{"short", "", "last"},
+		},
+		{
+			name: "inner spaces survive the trim",
+			raw:  "a  b   \r\nc",
+			want: []string{"a  b", "c"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Lines(tc.raw); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("Lines() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseLinksLabelIsCapped(t *testing.T) {
 	t.Parallel()
 	long := make([]byte, 0, 512)

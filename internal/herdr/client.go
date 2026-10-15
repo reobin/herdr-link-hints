@@ -93,6 +93,34 @@ func (c *Client) paneLinesSocket(ctx context.Context, pane string) ([]string, er
 	return strings.Split(result.Read.Text, "\n"), nil
 }
 
+// PaneANSI reads a pane's visible output with escape sequences intact,
+// so OSC 8 hyperlinks survive alongside the text.
+func (c *Client) PaneANSI(ctx context.Context, pane string) (string, error) {
+	text, err := c.paneANSISocket(ctx, pane)
+	if err == nil {
+		return text, nil
+	}
+	c.fellBack("pane.read", err)
+	out, err := c.run(ctx, "pane", "read", pane, "--source", SourceVisible, "--format", "ansi")
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func (c *Client) paneANSISocket(ctx context.Context, pane string) (string, error) {
+	params := map[string]any{"pane_id": pane, "source": SourceVisible, "format": "ansi"}
+	var result struct {
+		Read struct {
+			Text string `json:"text"`
+		} `json:"read"`
+	}
+	if err := c.call(ctx, "pane.read", params, &result); err != nil {
+		return "", err
+	}
+	return result.Read.Text, nil
+}
+
 // Rect is a cell rectangle on the surface panes tile.
 type Rect struct {
 	X      int `json:"x"`
