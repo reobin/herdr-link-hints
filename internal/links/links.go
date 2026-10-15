@@ -236,27 +236,34 @@ func FromMatches(lines []string, matches [][]Match, known map[string]bool) []Vis
 }
 
 // complete finishes a carried match from known scrollback.
+// The next line must actually continue the URL: a complete URL at the
+// end of a short line is not a wrap just because a longer URL elsewhere
+// shares its prefix (e.g. a repo URL vs its /releases/... download URL).
 func complete(carried Visible, line string, known map[string]bool) (Visible, int) {
 	if Clean(carried.Match) != carried.Match {
 		carried.Match = Clean(carried.Match)
 		return carried, 0
 	}
-	full := longestWithPrefix(known, carried.Match)
-	if full == "" {
-		carried.Match = Clean(carried.Match)
-		return carried, 0
-	}
-	carried.Match = full
 	if line == "" || isSpace(line[0]) {
 		return carried, 0
 	}
-	return carried, len(leadingWord.FindString(line))
+	cont := leadingWord.FindString(line)
+	if cont == "" {
+		return carried, 0
+	}
+	full := longestJoint(known, carried.Match, cont)
+	if full == "" {
+		return carried, 0
+	}
+	carried.Match = full
+	return carried, len(cont)
 }
 
-func longestWithPrefix(known map[string]bool, prefix string) string {
+func longestJoint(known map[string]bool, prefix, cont string) string {
+	want := Clean(prefix + cont)
 	best := ""
 	for url := range known {
-		if len(url) > len(prefix) && len(url) > len(best) && strings.HasPrefix(url, prefix) {
+		if len(url) >= len(want) && len(url) > len(best) && strings.HasPrefix(url, want) {
 			best = url
 		}
 	}

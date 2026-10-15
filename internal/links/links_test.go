@@ -101,6 +101,19 @@ func TestFromLines(t *testing.T) {
 			known: map[string]bool{"https://docs.a.io/guide/v2.1/install": true},
 			want:  []Visible{{Match: "https://docs.a.io/guide/v2", Row: 0, Col: 4}},
 		},
+		{
+			name:  "a url prefixing a longer url is not extended",
+			lines: []string{"see https://github.com/o/r", "- next https://github.com/o/s"},
+			known: map[string]bool{
+				"https://github.com/o/r":                            true,
+				"https://github.com/o/r/releases/latest/download/x": true,
+				"https://github.com/o/s":                            true,
+			},
+			want: []Visible{
+				{Match: "https://github.com/o/r", Row: 0, Col: 4},
+				{Match: "https://github.com/o/s", Row: 1, Col: 7},
+			},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
