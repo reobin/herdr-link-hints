@@ -55,38 +55,6 @@ func TestParsePaneScroll(t *testing.T) {
 	}
 }
 
-func TestPaneLinesOverSocket(t *testing.T) {
-	t.Parallel()
-	requests := make(chan map[string]any, 1)
-	socket := fakeServer(t, func(request map[string]any) [][]byte {
-		requests <- request
-		return [][]byte{mustJSON(t, map[string]any{
-			"id":     request["id"],
-			"result": map[string]any{"type": "pane_read", "read": map[string]any{"text": "a\nb\n"}},
-		})}
-	})
-
-	got, err := New(WithSocket(socket)).PaneLines(context.Background(), "w1:p1")
-	if err != nil {
-		t.Fatalf("PaneLines: %v", err)
-	}
-	if want := []string{"a", "b", ""}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("PaneLines() = %q, want %q", got, want)
-	}
-
-	request := <-requests
-	if request["method"] != "pane.read" {
-		t.Fatalf("method = %v", request["method"])
-	}
-	params, _ := request["params"].(map[string]any)
-	if params["pane_id"] != "w1:p1" || params["source"] != "visible" || params["format"] != "text" {
-		t.Fatalf("params = %+v", params)
-	}
-	if _, ok := params["lines"]; ok {
-		t.Fatalf("params = %+v, want no lines when the extent is left to Herdr", params)
-	}
-}
-
 func TestPaneANSIOverSocket(t *testing.T) {
 	t.Parallel()
 	const ansi = "go \x1b]8;;https://g.io/pull/232\x1b\\#232\x1b]8;;\x1b\\\n"
@@ -183,9 +151,6 @@ func TestSocketFallsBackToCLI(t *testing.T) {
 	} else if want := (Layout{Panes: []Pane{{ID: "w1:p9"}}}); !reflect.DeepEqual(panes, want) {
 		t.Fatalf("ScreenPanes() = %+v, want %+v", panes, want)
 	}
-	if _, err := client.PaneLines(context.Background(), "w1:p9"); err == nil {
-		t.Fatal("expected an error when both paths fail")
-	}
 	if _, err := client.PaneANSI(context.Background(), "w1:p9"); err == nil {
 		t.Fatal("expected an error when both paths fail")
 	}
@@ -204,7 +169,7 @@ func TestFallbackLogsTheSocketError(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	client := New(WithSocket(socketPath(t)), WithLogger(log))
 
-	if _, err := client.PaneLines(context.Background(), "w1:p9"); err == nil {
+	if _, err := client.PaneANSI(context.Background(), "w1:p9"); err == nil {
 		t.Fatal("expected an error when both paths fail")
 	}
 	if got := logged.String(); !strings.Contains(got, "pane.read") {

@@ -66,33 +66,6 @@ func defaultSocket() string {
 	return filepath.Join(home, ".config", "herdr", "herdr.sock")
 }
 
-// PaneLines reads a pane's visible text.
-func (c *Client) PaneLines(ctx context.Context, pane string) ([]string, error) {
-	text, err := c.paneLinesSocket(ctx, pane)
-	if err == nil {
-		return text, nil
-	}
-	c.fellBack("pane.read", err)
-	out, err := c.run(ctx, "pane", "read", pane, "--source", SourceVisible)
-	if err != nil {
-		return nil, err
-	}
-	return strings.Split(string(out), "\n"), nil
-}
-
-func (c *Client) paneLinesSocket(ctx context.Context, pane string) ([]string, error) {
-	params := map[string]any{"pane_id": pane, "source": SourceVisible, "format": "text"}
-	var result struct {
-		Read struct {
-			Text string `json:"text"`
-		} `json:"read"`
-	}
-	if err := c.call(ctx, "pane.read", params, &result); err != nil {
-		return nil, err
-	}
-	return strings.Split(result.Read.Text, "\n"), nil
-}
-
 // PaneANSI reads a pane's visible output with escape sequences intact,
 // so OSC 8 hyperlinks survive alongside the text.
 func (c *Client) PaneANSI(ctx context.Context, pane string) (string, error) {
