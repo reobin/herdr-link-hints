@@ -13,8 +13,15 @@ type Item struct {
 	URL string
 }
 
-// Pick selects a row: move the selection and confirm with Enter.
-func Pick(t *Terminal, items []Item) (int, bool) {
+// Choice is the picked row and whether to copy it instead of opening it.
+type Choice struct {
+	Index int
+	Copy  bool
+}
+
+// Pick selects a row: move the selection, confirm with Enter to open or
+// y to copy.
+func Pick(t *Terminal, items []Item) (Choice, bool) {
 	// Piped input reads a URL per line.
 	if !t.interactive() {
 		return t.pickByLine(items)
@@ -25,10 +32,10 @@ func Pick(t *Terminal, items []Item) (int, bool) {
 		t.renderList(items, sel)
 		switch k := t.readKey(); k.kind {
 		case keyEnd, keyEscape:
-			return 0, false
+			return Choice{}, false
 		case keyEnter:
 			if len(items) > 0 {
-				return sel, true
+				return Choice{Index: sel}, true
 			}
 		case keyUp:
 			if sel > 0 {
@@ -48,6 +55,10 @@ func Pick(t *Terminal, items []Item) (int, bool) {
 				if sel > 0 {
 					sel--
 				}
+			case 'y', 'Y':
+				if len(items) > 0 {
+					return Choice{Index: sel, Copy: true}, true
+				}
 			}
 		}
 	}
@@ -62,18 +73,18 @@ func clampSel(sel, total int) int {
 }
 
 // pickByLine reads one URL per line.
-func (t *Terminal) pickByLine(items []Item) (int, bool) {
+func (t *Terminal) pickByLine(items []Item) (Choice, bool) {
 	line, err := t.lines.ReadString('\n')
 	url := strings.TrimSpace(line)
 	if url == "" || (err != nil && line == "") {
-		return 0, false
+		return Choice{}, false
 	}
 	for i, item := range items {
 		if item.URL == url {
-			return i, true
+			return Choice{Index: i}, true
 		}
 	}
-	return 0, false
+	return Choice{}, false
 }
 
 // renderList draws the status, the visible window, and the key help
@@ -183,14 +194,19 @@ func (l layout) footerLine() line {
 }
 
 // footerHelp pairs each key with its action the way TUIs usually do:
-// the key bright, what it does dim.
+// the key bright, what it does dim. The short form joins keys with one
+// space so it still fits a clamped popup.
 func footerHelp(short bool) line {
-	keys := []string{"↑↓/jk", "enter", "esc"}
-	labels := []string{"move", "open", "quit"}
+	keys := []string{"↑↓/jk", "enter", "y", "esc"}
+	labels := []string{"move", "open", "copy", "quit"}
+	sep := "   "
+	if short {
+		sep = " "
+	}
 	var out line
 	for i, key := range keys {
 		if i > 0 {
-			out = append(out, segment{text: "   "})
+			out = append(out, segment{text: sep})
 		}
 		out = append(out, segment{text: key, sgr: "1"})
 		if !short {

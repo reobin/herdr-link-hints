@@ -109,11 +109,15 @@ func (a *app) pick(ctx context.Context, term *ui.Terminal) int {
 		return exitCancelled
 	}
 
-	index, picked := ui.Pick(term, itemsFor(found))
+	selection, picked := ui.Pick(term, itemsFor(found))
 	if !picked {
 		return exitCancelled
 	}
-	choice := found[index]
+	choice := found[selection.Index]
+
+	if selection.Copy {
+		return a.copyURL(term, choice.URL)
+	}
 
 	scanner := &scan.Scanner{Source: a.client, Log: a.log}
 	row, col, located := scanner.Locate(ctx, choice, a.grownBy(ctx, choice.Pane, p.Scrolls))
@@ -133,6 +137,14 @@ func (a *app) pick(ctx context.Context, term *ui.Terminal) int {
 		return exitFailed
 	}
 	term.Printf("\nOpened %s in browser.\n", url)
+	return exitOK
+}
+
+// copyURL writes the URL to the clipboard via OSC 52 and reports it.
+// Unlike opening, it needs no locate: the URL copies even when scrolled.
+func (a *app) copyURL(term *ui.Terminal, url string) int {
+	term.Copy(url)
+	term.Printf("\nCopied %s.\n", url)
 	return exitOK
 }
 

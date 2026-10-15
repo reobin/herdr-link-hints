@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/reobin/herdr-link-hints/internal/clipboard"
 )
 
 const (
@@ -74,6 +76,13 @@ func (t *Terminal) Clear() {
 }
 
 func (t *Terminal) Flush() { _ = t.out.Flush() }
+
+// Copy emits an OSC 52 clipboard write. Herdr forwards it to the user's
+// clipboard.
+func (t *Terminal) Copy(text string) {
+	_ = clipboard.Copy(t.out, text)
+	t.Flush()
+}
 
 // spinnerText drops the label rather than clipping it.
 func (t *Terminal) spinnerText(frame int, label string) string {

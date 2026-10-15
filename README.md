@@ -6,7 +6,8 @@ to open one.
 
 Each row is one link: its URL, each URL listed once.
 
-Move with the arrow keys or j/k and confirm with Enter.
+Move with the arrow keys or j/k, confirm with Enter to open
+or y to copy.
 
 ![demo](docs/demo.gif)
 

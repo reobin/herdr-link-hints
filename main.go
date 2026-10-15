@@ -74,11 +74,17 @@ func start() (context.Context, context.CancelFunc, *app) {
 func runDemo(term *ui.Terminal) int {
 	found := demo.Ranked()
 
-	index, picked := ui.Pick(term, itemsFor(found))
+	selection, picked := ui.Pick(term, itemsFor(found))
 	if !picked {
 		return exitCancelled
 	}
-	term.Printf("\nOpened %s in demo.\n", found[index].URL)
+	choice := found[selection.Index]
+	if selection.Copy {
+		term.Copy(choice.URL)
+		term.Printf("\nCopied %s in demo.\n", choice.URL)
+		return exitOK
+	}
+	term.Printf("\nOpened %s in demo.\n", choice.URL)
 	return exitOK
 }
 

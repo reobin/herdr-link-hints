@@ -540,3 +540,23 @@ func TestGatherRanksLinksForTheList(t *testing.T) {
 		t.Fatalf("gather().Found = %+v, want the nearest occurrence of each URL first", found)
 	}
 }
+
+// Copying writes an OSC 52 sequence and reports the URL.
+func TestCopyWritesTheURLToTheClipboard(t *testing.T) {
+	t.Parallel()
+	f := newFakeClient()
+	a := testApp(t, f, config.Config{})
+
+	term, out := pipeTerminal(t, "\n")
+	if code := a.copyURL(term, "https://a.io/x"); code != exitOK {
+		t.Fatalf("copyURL() = %d, want %d", code, exitOK)
+	}
+	term.Close()
+	got := out.String()
+	if !strings.Contains(got, "\x1b]52;c;") {
+		t.Fatalf("copyURL() wrote %q, want an OSC 52 sequence", got)
+	}
+	if !strings.Contains(got, "Copied https://a.io/x") {
+		t.Fatalf("copyURL() reported %q, want the copied url", got)
+	}
+}

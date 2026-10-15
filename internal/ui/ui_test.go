@@ -123,21 +123,24 @@ func TestPick(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
-		want  int
+		want  Choice
 		ok    bool
 	}{
-		{"enter opens the first row", "\r", 0, true},
-		{"escape quits", "\x1b", 0, false},
-		{"down then Enter opens the highlighted row", "\x1b[B\r", 1, true},
-		{"up at the top stays", "\x1b[A\r", 0, true},
-		{"down past the end stays", "\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r", 4, true},
-		{"j moves down", "j\r", 1, true},
-		{"k at the top stays", "k\r", 0, true},
-		{"j and k move", "jjk\r", 1, true},
-		{"arrows and j/k mix", "\x1b[Bj\x1b[Bk\r", 2, true},
-		{"ctrl-n and ctrl-p move", "\x0e\x0e\x10\r", 1, true},
-		{"other keys are ignored", "azx\r", 0, true},
-		{"input running out quits", "j", 0, false},
+		{"enter opens the first row", "\r", Choice{Index: 0}, true},
+		{"escape quits", "\x1b", Choice{}, false},
+		{"down then Enter opens the highlighted row", "\x1b[B\r", Choice{Index: 1}, true},
+		{"up at the top stays", "\x1b[A\r", Choice{Index: 0}, true},
+		{"down past the end stays", "\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B\r", Choice{Index: 4}, true},
+		{"j moves down", "j\r", Choice{Index: 1}, true},
+		{"k at the top stays", "k\r", Choice{Index: 0}, true},
+		{"j and k move", "jjk\r", Choice{Index: 1}, true},
+		{"arrows and j/k mix", "\x1b[Bj\x1b[Bk\r", Choice{Index: 2}, true},
+		{"ctrl-n and ctrl-p move", "\x0e\x0e\x10\r", Choice{Index: 1}, true},
+		{"y copies the first row", "y", Choice{Index: 0, Copy: true}, true},
+		{"down then y copies the highlighted row", "\x1b[By", Choice{Index: 1, Copy: true}, true},
+		{"Y copies too", "Y", Choice{Index: 0, Copy: true}, true},
+		{"other keys are ignored", "azx\r", Choice{Index: 0}, true},
+		{"input running out quits", "j", Choice{}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,9 +148,18 @@ func TestPick(t *testing.T) {
 			term, _ := keyTerminal(t, []byte(tc.input))
 			got, ok := Pick(term, items("aa", "as", "ad", "sa", "ss"))
 			if ok != tc.ok || (ok && got != tc.want) {
-				t.Fatalf("Pick() = %d, %v; want %d, %v", got, ok, tc.want, tc.ok)
+				t.Fatalf("Pick() = %+v, %v; want %+v, %v", got, ok, tc.want, tc.ok)
 			}
 		})
+	}
+}
+
+// Copying nothing quits instead of picking a row that is not there.
+func TestPickCopyOnAnEmptyListQuits(t *testing.T) {
+	t.Parallel()
+	term, _ := keyTerminal(t, []byte("y"))
+	if _, ok := Pick(term, nil); ok {
+		t.Fatal("Pick() on an empty list should not select anything")
 	}
 }
 
@@ -155,8 +167,8 @@ func TestPickByLine(t *testing.T) {
 	t.Parallel()
 	term, _ := lineTerminal("https://x.io/ad\n")
 	got, ok := Pick(term, items("aa", "as", "ad"))
-	if !ok || got != 2 {
-		t.Fatalf("Pick() = %d, %v", got, ok)
+	if !ok || got.Index != 2 || got.Copy {
+		t.Fatalf("Pick() = %+v, %v", got, ok)
 	}
 
 	term, _ = lineTerminal("https://x.io/zz\n")
@@ -183,7 +195,7 @@ func TestRenderListShowsStatusRowsAndHelp(t *testing.T) {
 		" https://x.io/a",
 		" https://x.io/s" + strings.Repeat(" ", 45),
 		"", "", "", "", "",
-		" ↑↓/jk move   enter open   esc quit",
+		" ↑↓/jk move   enter open   y copy   esc quit",
 	}
 	if !slices.Equal(rows, want) {
 		t.Fatalf("rendered list:\n%s\nwant:\n%s", text, strings.Join(want, "\r\n"))
@@ -215,7 +227,7 @@ func TestRenderListAdaptsToASmallPopup(t *testing.T) {
 	term.renderList(items("a"), 0)
 	term.Flush()
 	rows := strings.Split(stripSGR(out.String()), "\r\n")
-	want := []string{"1 link", "https://x.io/a" + strings.Repeat(" ", 6), "↑↓/jk   enter   esc"}
+	want := []string{"1 link", "https://x.io/a" + strings.Repeat(" ", 6), "↑↓/jk enter y esc"}
 	if !slices.Equal(rows, want) {
 		t.Fatalf("rows = %q, want %q", rows, want)
 	}
@@ -401,5 +413,16 @@ func TestCentrePadRoundsUp(t *testing.T) {
 		if got := centrePad(tc.width, tc.text); got != tc.want {
 			t.Fatalf("centrePad(%d, %d) = %d, want %d", tc.width, tc.text, got, tc.want)
 		}
+	}
+}
+
+// Copy emits an OSC 52 write so Herdr forwards the text to the clipboard.
+func TestCopy(t *testing.T) {
+	t.Parallel()
+	term, out := keyTerminal(t, nil)
+	term.Copy("https://x.io/a")
+	term.Flush()
+	if got := out.String(); !strings.HasPrefix(got, "\x1b]52;c;") || !strings.Contains(got, "\x07") {
+		t.Fatalf("Copy() wrote %q, want an OSC 52 sequence", got)
 	}
 }
