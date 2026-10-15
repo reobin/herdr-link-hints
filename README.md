@@ -19,6 +19,8 @@ Needs herdr 0.9.2+.
 herdr plugin install reobin/herdr-link-hints
 ```
 
+On herdr 0.9.4+, update with `herdr plugin update herdr-link-hints` - running plugin panes keep their old files and new runs pick it up with no config reload.
+
 Bind a key in `~/.config/herdr/config.toml`, then
 `herdr server reload-config`:
 
